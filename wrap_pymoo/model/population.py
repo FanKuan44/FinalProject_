@@ -1,36 +1,35 @@
 import numpy as np
+from wrap_pymoo.model.individual import MyIndividual as Individual
 
-from wrap_pymoo.model.individual import Individual
 
-
-class Population(np.ndarray):
-    def __new__(cls, n_individuals=0, individual=Individual()):
-        obj = super(Population, cls).__new__(cls, n_individuals, dtype=individual.__class__).view(cls)
+class MyPopulation(np.ndarray):
+    def __new__(cls, n_individuals=0, individual=Individual(), *args, **kwargs):
+        obj = super(MyPopulation, cls).__new__(cls, n_individuals, dtype=individual.__class__).view(cls)
         for i in range(n_individuals):
             obj[i] = individual.copy()
         obj.individual = individual
         return obj
 
     def merge(self, other):
-        obj = np.concatenate([self, other]).view(Population)
+        obj = np.concatenate([self, other]).view(MyPopulation)
         obj.individual = self.individual
         return obj
 
-    def copy(self):
-        pop = Population(n_individuals=len(self), individual=self.individual)
+    def copy(self, order='C'):
+        pop = MyPopulation(n_individuals=len(self), individual=self.individual)
         for i in range(len(self)):
             pop[i] = self[i]
         return pop
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo, *args, **kwargs):
         return self.copy()
 
     def new(self, *args):
         if len(args) == 1:
-            return Population(n_individuals=args[0], individual=self.individual)
+            return MyPopulation(n_individuals=args[0], individual=self.individual)
         else:
             n = len(args[1]) if len(args) > 0 else 0
-            pop = Population(n_individuals=n, individual=self.individual)
+            pop = MyPopulation(n_individuals=n, individual=self.individual)
             if len(args) > 0:
                 pop.set(*args)
             return pop
@@ -48,11 +47,11 @@ class Population(np.ndarray):
             key, values = args[i * 2], args[i * 2 + 1]
             if len(values) != len(self):
                 raise Exception("Population Set Attribute Error: Number of values and population size do not match!")
-            for i in range(len(values)):
-                if key in self[i].__dict__:
-                    self[i].__dict__[key] = values[i]
+            for j in range(len(values)):
+                if key in self[j].__dict__:
+                    self[j].__dict__[key] = values[j]
                 else:
-                    self[i].data[key] = values[i]
+                    self[j].data[key] = values[j]
 
     def get(self, *args):
         val = {}
@@ -78,9 +77,8 @@ class Population(np.ndarray):
 
 
 if __name__ == '__main__':
-    pop = Population(10)
-    pop.get("F")
-    print(type(pop))
-    x = pop.new()
+    Pop = MyPopulation(10)
+    Pop.get('F')
+    print(type(Pop))
+    x = Pop.new()
     print(x)
-

@@ -1,0 +1,27 @@
+*************************************** NSGA-II ON BOSMAN-BENCHMARK-CIFAR10 ***************************************
+
+--------------------------------------- Hyper-Parameters of Problem ---------------------------------------
+
+# Benchmark Dataset: cifar10
+# Objectives Optimize: [1 - Validation Accuracy; MMACs (normalize)]
+
+**************************************************
+
+--------------------------------------- Hyper-Parameters of Algorithm ---------------------------------------
+
+# Random seed: 0
+# Population Size: 50
+# Number of Max Evaluate: 100
+# Local Search on PF: False
+# Local Search on Knee Solutions: False
+
+**************************************************
+
+-------------------- Gen 0 --------------------
+# No.Evaluated: 50
+# Distance from True Pareto Front to Approximate Pareto Front: 0.07706
+
+-------------------- Gen 1 --------------------
+# No.Evaluated: 150
+# Distance from True Pareto Front to Approximate Pareto Front: 0.07554
+

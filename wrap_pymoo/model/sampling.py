@@ -9,7 +9,7 @@ class MySampling(Sampling):
 
     def sample(self, problem, pop, n_samples, **kwargs):
         pop_X = []
-        pop_hash_X = []
+        pop_hashX = []
         pop_F = []
         if problem.problem_name == 'nas101':
             benchmark = kwargs['algorithm'].benchmark
@@ -32,13 +32,13 @@ class MySampling(Sampling):
 
                     if benchmark.is_valid(spec):
                         module_hash_spec = benchmark.get_module_hash(spec)
-                        if module_hash_spec not in pop_hash_X:
+                        if module_hash_spec not in pop_hashX:
                             X = np.concatenate((matrix, ops), axis=0)
                             F = kwargs['algorithm'].evaluator.eval(
                                 problem, np.array([X]), check=True, algorithm=kwargs['algorithm'])[0]
                             pop_F.append(F)
                             pop_X.append(X)
-                            pop_hash_X.append(module_hash_spec)
+                            pop_hashX.append(module_hash_spec)
                             break
         elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
             allowed_ops = ['I', '1', '2']
@@ -46,12 +46,12 @@ class MySampling(Sampling):
                 while True:
                     model = np.random.choice(allowed_ops, size=14)
                     model_str = ''.join(model.tolist())
-                    if model_str not in pop_hash_X:
+                    if model_str not in pop_hashX:
                         F = kwargs['algorithm'].evaluator.eval(
                             problem, np.array([model_str]), check=True, algorithm=kwargs['algorithm'])
                         pop_F.append(F)
                         pop_X.append(model)
-                        pop_hash_X.append(model_str)
+                        pop_hashX.append(model_str)
                         break
         pop_ = pop.new(n_samples)
 
@@ -59,11 +59,11 @@ class MySampling(Sampling):
         feasible = np.ones((n_samples, 1), dtype=np.bool)
 
         pop_X = np.array(pop_X)
-        pop_hash_X = np.array(pop_hash_X)
+        pop_hashX = np.array(pop_hashX)
         pop_F = np.array(pop_F)
 
         pop_.set('X', np.array(pop_X))
-        pop_.set('hash_X', np.array(pop_hash_X))
+        pop_.set('hash_X', np.array(pop_hashX))
         pop_.set('F', np.array(pop_F))
         pop_.set('CV', CV)
         pop_.set('feasible', feasible)

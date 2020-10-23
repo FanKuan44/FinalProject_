@@ -4,7 +4,6 @@ import copy
 from pymoo.rand import random
 from nasbench import api
 
-
 from abc import abstractmethod
 
 
@@ -33,17 +32,15 @@ class Mutation:
             The mutated population.
 
         """
-
         return self._do(problem, pop, **kwargs)
 
-    @abstractmethod
     def _do(self, problem, pop, **kwargs):
         pop_X = pop.get('X')
-        pop_hash_X = pop.get('hash_X')
+        pop_hashX = pop.get('hashX')
 
-        off_X = []
-        off_hash_X = []
-        while len(off_X) < len(pop_X):
+        offspring_X = []
+        offspring_hashX = []
+        while len(offspring_X) < len(pop_X):
             if problem.problem_name == 'nas101':
                 benchmark = kwargs['algorithm'].benchmark
                 for x in pop_X:
@@ -69,43 +66,41 @@ class Mutation:
                             pop_new_hash_X.append(benchmark.get_module_hash(new_spec))
                             break
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
-                # Co the xay ra truong hop dot bien nhieu vi tri
-                idx_mutation = np.random.rand(pop_X.shape[0], pop_X.shape[1])
+                # Co the xay ra dot bien o nhieu vi tri
+                mutation_pts = np.random.rand(pop_X.shape[0], pop_X.shape[1])
 
                 for i in range(pop_X.shape[0]):
-                    off_old_X = pop_X[i].copy()
+                    offspring_old_X = pop_X[i].copy()
 
                     for j in range(pop_X.shape[1]):
-                        if idx_mutation[i][j] <= self.prob:
+                        if mutation_pts[i][j] <= self.prob:
                             choices = ['I', '1', '2']
-                            choices.remove(off_old_X[j])
-                            off_old_X[j] = np.random.choice(choices)
+                            choices.remove(offspring_old_X[j])
+                            offspring_old_X[j] = np.random.choice(choices)
 
-                    off_new_hash_X = ''.join(off_old_X)
+                    offspring_new_hashX = ''.join(offspring_old_X)
 
-                    if off_new_hash_X not in off_hash_X and off_new_hash_X not in pop_hash_X:
-                        off_new_X = off_old_X.copy()
-                        off_X.append(off_new_X)
-                        off_hash_X.append(off_new_hash_X)
+                    if offspring_new_hashX not in offspring_hashX and offspring_new_hashX not in pop_hashX:
+                        offspring_new_X = offspring_old_X.copy()
+                        offspring_X.append(offspring_new_X)
+                        offspring_hashX.append(offspring_new_hashX)
 
-        off_X = np.array(off_X)[:pop_X.shape[0]]
-        off_hash_X = np.array(off_hash_X)[:pop_X.shape[0]]
+        offspring_X = np.array(offspring_X)[:len(pop_X)]
+        offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
 
         # USING FOR CHECKING DUPLICATE
-        if np.sum(np.unique(off_hash_X, return_counts=True)[-1]) != pop_X.shape[0]:
-            print('Duplicate')
+        if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
+            print('DUPLICATE')
 
-        for hash_X in off_hash_X:
-            if hash_X in pop_hash_X:
-                print('Duplicate', hash_X)
+        for hashX in offspring_hashX:
+            if hashX in pop_hashX:
+                print('DUPLICATE', hashX)
                 break
         # -----------------------------------
-
-        offspring = pop.new(pop_X.shape[0])
-        offspring.set('X', off_X)
-        offspring.set('hash_X', off_hash_X)
+        offspring = pop.new(len(pop_X))
+        offspring.set('X', offspring_X)
+        offspring.set('hashX', offspring_hashX)
         return offspring
-
 
 # class MyMutation(Mutation):
 #     def __init__(self, eta, prob=None):

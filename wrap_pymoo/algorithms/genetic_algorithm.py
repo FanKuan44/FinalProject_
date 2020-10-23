@@ -69,7 +69,7 @@ class GeneticAlgorithm(Algorithm):
 
         self._each_iteration(self, first=True)
 
-        # while termination criterium not fulfilled
+        # while termination criteria not fulfilled
         while termination.do_continue(self):
             self.n_gen += 1
 

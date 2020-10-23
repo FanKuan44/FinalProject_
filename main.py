@@ -67,7 +67,7 @@ class NAS(MyProblem):
         print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> LOAD BENCHMARK DONE! <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
 
     def _evaluate(self, x, out, check=False, *args, **kwargs):
-        f = np.full((x.shape[0], self.n_obj), np.nan)
+        F = np.full((x.shape[0], self.n_obj), np.nan)
 
         if self.problem_name == 'nas101':
             benchmark = kwargs['algorithm'].benchmark
@@ -76,8 +76,8 @@ class NAS(MyProblem):
                 # data = benchmark.query(cell)
                 module_hash = benchmark.get_module_hash(cell)
 
-                f[i, 0] = 1 - self.benchmark_data[module_hash]['val_acc']
-                f[i, 1] = (self.benchmark_data[module_hash]['training_time'] - self.min_max['min_training_time']) / (
+                F[i, 0] = 1 - self.benchmark_data[module_hash]['val_acc']
+                F[i, 1] = (self.benchmark_data[module_hash]['training_time'] - self.min_max['min_training_time']) / (
                         self.min_max['max_training_time'] - self.min_max['min_training_time'])
 
                 self._n_evaluated += 1
@@ -85,14 +85,14 @@ class NAS(MyProblem):
         elif self.problem_name == 'cifar10' or self.problem_name == 'cifar100':
             for i in range(x.shape[0]):
                 x_str = ''.join(x[i].tolist())
-                f[i, 0] = 1 - self.benchmark_data[x_str]['val_acc']/100
-                f[i, 1] = (self.benchmark_data[x_str]['MMACs'] - self.min_max['min_MMACs']) / (
+                F[i, 0] = 1 - self.benchmark_data[x_str]['val_acc']/100
+                F[i, 1] = (self.benchmark_data[x_str]['MMACs'] - self.min_max['min_MMACs']) / (
                         self.min_max['max_MMACs'] - self.min_max['min_MMACs'])
 
                 self._n_evaluated += 1
-        out["F"] = f
+        out["F"] = F
         if check:
-            return f
+            return F
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -236,6 +236,7 @@ if __name__ == '__main__':
         # configure the nsga-net method
         method = engine.nsganet(pop_size=args.pop_size,
                                 n_offsprings=args.pop_size,
+                                benchmark=args.benchmark_name,
                                 local_search_on_pf=args.local_search_on_pf,
                                 local_search_on_knee=args.local_search_on_knee,
                                 path=path_)

@@ -1,11 +1,10 @@
 import copy
 
 
-class Individual:
-
+class MyIndividual:
     def __init__(self, **kwargs) -> None:
         self.X = None
-        self.hash_X = None
+        self.hashX = None
         self.F = None
         self.CV = None
         self.G = None
@@ -13,7 +12,10 @@ class Individual:
         self.data = kwargs
 
     def set(self, key, value):
-        self.data[key] = value
+        if key in self.__dict__:
+            self.__dict__[key] = value
+        elif key in self.data:
+            self.data[key] = value
 
     def copy(self):
         ind = copy.copy(self)
@@ -21,7 +23,9 @@ class Individual:
         return ind
 
     def get(self, key):
-        if key in self.data:
+        if key in self.__dict__:
+            return self.__dict__[key]
+        elif key in self.data:
             return self.data[key]
         else:
             return None
