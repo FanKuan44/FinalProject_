@@ -48,7 +48,6 @@
 # from deap.tools._hypervolume.pyhv import _HyperVolume
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-import matplotlib.patches as mpatches
 from datetime import datetime
 import pickle
 import pygmo as pg
@@ -468,7 +467,6 @@ def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
 
 def visualize_hp_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig=False, save_fig=False):
     min_f0, max_f0, min_f1, max_f1 = find_max_f0_f1_min_f0_f1(paths)
-
     hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1)
 
     fig, ax = plt.subplots(1)
@@ -494,21 +492,21 @@ def visualize_hp_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig=
 
 
 def main():
-    path_1 = 'nas101_popsize_100_False_False_13_10_2020_09_13_23'
-    path_2 = 'nas101_popsize_100_False_True_13_10_2020_12_08_58'
+    path_1 = 'cifar10_popsize_100_True_False_24_10_2020_13_32_34'
+    path_2 = 'cifar10_popsize_100_False_False_24_10_2020_13_46_12'
     path_3 = 'nas101_popsize_100_True_False_13_10_2020_10_05_31'
 
-    paths = [path_1, path_2, path_3]
+    paths = [path_1, path_2]
 
     benchmark = path_1.split('_')[0]
 
-    # visualize_dpf_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark,
-    #                                              show_fig=False, save_fig=True)
+    visualize_dpf_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark,
+                                                 show_fig=False, save_fig=True)
 
-    visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
-                                         plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
+    # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
+    #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    # visualize_hp_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark, show_fig=False, save_fig=True)
+    visualize_hp_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark, show_fig=False, save_fig=True)
 
 
 if __name__ == '__main__':

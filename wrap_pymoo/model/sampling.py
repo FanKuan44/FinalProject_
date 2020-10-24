@@ -63,7 +63,7 @@ class MySampling(Sampling):
         pop_F = np.array(pop_F)
 
         pop_.set('X', np.array(pop_X))
-        pop_.set('hash_X', np.array(pop_hashX))
+        pop_.set('hashX', np.array(pop_hashX))
         pop_.set('F', np.array(pop_F))
         pop_.set('CV', CV)
         pop_.set('feasible', feasible)

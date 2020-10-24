@@ -50,9 +50,15 @@ class MyPointCrossover:
         offspring_X = []
         offspring_hashX = []
 
+        number_of_crossover = 0
+        flag = False
+
         while len(offspring_X) < len(pop_X):
+            if number_of_crossover > 100:
+                flag = True
             idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
             pop_X_ = pop.get('X')[idx]
+
             if problem.problem_name == 'nas101':
                 for i in range(len(pop_X_)):
                     while True:
@@ -90,6 +96,7 @@ class MyPointCrossover:
                             for idv in hash_val_:
                                 offspring_hashX.append(idv)
                             break
+
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
                 # 1 point crossover
                 for i in range(len(pop_X_)):
@@ -103,25 +110,32 @@ class MyPointCrossover:
                     offspring1_hashX = ''.join(offspring1_X.tolist())
                     offspring2_hashX = ''.join(offspring2_X.tolist())
 
-                    if offspring1_hashX not in offspring_hashX and offspring1_hashX not in pop_hashX:
+                    if not flag:
+                        if (offspring1_hashX not in offspring_hashX) and (offspring1_hashX not in pop_hashX):
+                            offspring_X.append(offspring1_X)
+                            offspring_hashX.append(offspring1_hashX)
+
+                        if (offspring2_hashX not in offspring_hashX) and (offspring2_hashX not in pop_hashX):
+                            offspring_X.append(offspring2_X)
+                            offspring_hashX.append(offspring2_hashX)
+                    else:
                         offspring_X.append(offspring1_X)
                         offspring_hashX.append(offspring1_hashX)
 
-                    if offspring2_hashX not in offspring_hashX and offspring2_hashX not in pop_hashX:
                         offspring_X.append(offspring2_X)
                         offspring_hashX.append(offspring2_hashX)
-
+            number_of_crossover += 1
         offspring_X = np.array(offspring_X)[:len(pop_X)]
         offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
 
-        # USING FOR CHECKING DUPLICATE
-        if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
-            print('DUPLICATE')
-
-        for hashX in offspring_hashX:
-            if hashX in pop_hashX:
-                print('DUPLICATE', hashX)
-                break
+        ''' USING FOR CHECKING DUPLICATE '''
+        # if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
+        #     print('DUPLICATE')
+        #
+        # for hashX in offspring_hashX:
+        #     if hashX in pop_hashX:
+        #         print('DUPLICATE', hashX)
+        #         break
         # -----------------------------------
         offspring = pop.new(len(pop_X))
         offspring.set('X', offspring_X)
