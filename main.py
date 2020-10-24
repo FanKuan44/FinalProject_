@@ -39,6 +39,10 @@ parser.add_argument('--save', type=int, default=0, help='save to log file')
 parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
 parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
 parser.add_argument('--local_search_on_knee', type=int, default=0, help='local search on knee solutions')
+parser.add_argument('--local_search_on_pf_bosman', type=int, default=0,
+                    help='local search on pareto front (bosman version)')
+parser.add_argument('--local_search_on_knee_bosman', type=int, default=0,
+                    help='local search on knee solutions (bosman version)')
 
 args = parser.parse_args()
 
@@ -76,18 +80,19 @@ class NAS(MyProblem):
                 # data = benchmark.query(cell)
                 module_hash = benchmark.get_module_hash(cell)
 
-                F[i, 0] = 1 - self.benchmark_data[module_hash]['val_acc']
-                F[i, 1] = (self.benchmark_data[module_hash]['training_time'] - self.min_max['min_training_time']) / (
+                F[i, 0] = (self.benchmark_data[module_hash]['training_time'] - self.min_max['min_training_time']) / (
                         self.min_max['max_training_time'] - self.min_max['min_training_time'])
+                F[i, 1] = 1 - self.benchmark_data[module_hash]['val_acc']
 
                 self._n_evaluated += 1
 
         elif self.problem_name == 'cifar10' or self.problem_name == 'cifar100':
             for i in range(x.shape[0]):
                 x_str = ''.join(x[i].tolist())
-                F[i, 0] = 1 - self.benchmark_data[x_str]['val_acc']/100
-                F[i, 1] = (self.benchmark_data[x_str]['MMACs'] - self.min_max['min_MMACs']) / (
+
+                F[i, 0] = (self.benchmark_data[x_str]['MMACs'] - self.min_max['min_MMACs']) / (
                         self.min_max['max_MMACs'] - self.min_max['min_MMACs'])
+                F[i, 1] = 1 - self.benchmark_data[x_str]['val_acc'] / 100
 
                 self._n_evaluated += 1
         out["F"] = F
@@ -127,28 +132,21 @@ def do_every_generations(algorithm):
         logfile.write('\n')
         logfile.write(f'# No.Evaluated: {algorithm.problem._n_evaluated}\n')
 
-        # pf = algorithm.elitist_archive_F
-        # logfile.write(f'# Number of Elitist Archive: {len(pf)}\n')
-        # pf = np.unique(pf, axis=0)
-        # pf = pf[np.argsort(pf[:, 1])]
-        logfile.write(f'# Distance from True Pareto Front to Approximate Pareto Front: {algorithm.dpf[-1]}\n\n')
+        pf = algorithm.elitist_archive_F
+        pf = pf[np.argsort(pf[:, 0])]
+        # logfile.write(f'# Distance from True Pareto Front to Approximate Pareto Front: {algorithm.dpf[-1]}\n\n')
 
-        # pickle.dump([pf, algorithm.problem._n_evaluated],
-        #             open(f'{algorithm.path}/pf_eval/pf_and_evaluated_gen_{gen}.p', 'wb'))
+        pickle.dump([pf, algorithm.problem._n_evaluated],
+                    open(f'{algorithm.path}/pf_eval/pf_and_evaluated_gen_{gen}.p', 'wb'))
 
-        """ Plot pareto front / elitist archive"""
-        # pop = algorithm.pop
-        # pop_f = pop.get("F")
-        # front = NonDominatedSorting().do(pop_f, n_stop_if_ranked=algorithm.pop_size)
-        # pf_ = pop_f[front[0]]
-        #
-        # plt.scatter(pf_[:, 1], pf_[:, 0], c='blue', s=10, label=f'front0')
-
-        # plt.scatter(pf[:, 1], pf[:, 0], s=20, edgecolors='red', facecolors='none', label=f'elitist archive {dpf}')
-        # plt.title(f'Gen {gen}')
-        # plt.legend()
-        # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
-        # plt.clf()
+        ''' Plot pareto front / elitist archive '''
+        # plt.scatter(pf[:, 1], pf[:, 0], c='blue', s=15, label='Elitist Archive')
+        # plt.scatter(algorithm.pf_true[:, 1], algorithm.pf_true[:, 0], s=30, edgecolors='red', facecolors='none',
+        #             label='True PF')
+        plt.title(f'Gen {gen}')
+        plt.legend()
+        plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
+        plt.clf()
 
 
 if __name__ == '__main__':
@@ -166,8 +164,10 @@ if __name__ == '__main__':
     problem = NAS(problem_name=args.benchmark_name)
 
     for run_i in range(args.number_of_runs):
-        np.random.seed(args.seed + run_i * 100)
+        seed = args.seed + run_i * 100
+        np.random.seed(seed)
         print(f"---------------------- LAN {run_i} ----------------------")
+        print('Seed:', seed)
         if args.save == 1:
             # Name of sub-folder
             path_ = path + f'/{run_i}/'
@@ -222,7 +222,7 @@ if __name__ == '__main__':
 
             logfile.write('--------------------------------------- Hyper-Parameters of Algorithm '
                           '---------------------------------------\n\n')
-            logfile.write(f'# Random seed: {args.seed + run_i * 100}\n')
+            logfile.write(f'# Random seed: {seed}\n')
             logfile.write(f'# Population Size: {args.pop_size}\n')
             logfile.write(f'# Number of Max Evaluate: {args.n_eval}\n')
             logfile.write(f'# Local Search on PF: {bool(args.local_search_on_pf)}\n')
@@ -239,6 +239,8 @@ if __name__ == '__main__':
                                 benchmark=args.benchmark_name,
                                 local_search_on_pf=args.local_search_on_pf,
                                 local_search_on_knee=args.local_search_on_knee,
+                                local_search_on_pf_bosman=args.local_search_on_pf_bosman,
+                                local_search_on_knee_bosman=args.local_search_on_knee_bosman,
                                 path=path_)
 
         res = minimize(problem,
