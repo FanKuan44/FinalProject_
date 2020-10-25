@@ -42,29 +42,32 @@ class Mutation:
         offspring_hashX = []
         while len(offspring_X) < len(pop_X):
             if problem.problem_name == 'nas101':
-                benchmark = kwargs['algorithm'].benchmark
+                benchmark_api = kwargs['algorithm'].benchmark_api
                 for x in pop_X:
-                    while True:
-                        new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
-                        new_ops = copy.deepcopy(x[-1, :])
-                        # In expectation, V edges flipped (note that most end up being pruned).
-                        edge_mutation_prob = 1 / 7
-                        for src in range(0, 7 - 1):
-                            for dst in range(src + 1, 7):
-                                if random.random() < edge_mutation_prob:
-                                    new_matrix[src, dst] = 1 - new_matrix[src, dst]
+                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
+                    new_ops = copy.deepcopy(x[-1, :])
+                    # In expectation, V edges flipped (note that most end up being pruned).
+                    edge_mutation_prob = 1 / 7
+                    for src in range(0, 7 - 1):
+                        for dst in range(src + 1, 7):
+                            if random.random() < edge_mutation_prob:
+                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
 
-                        # In expectation, one op is resampled.
-                        op_mutation_prob = 1 / 5
-                        for ind in range(1, 7 - 1):
-                            if random.random() < op_mutation_prob:
-                                available = [o for o in benchmark.config['available_ops'] if o != new_ops[ind]]
-                                new_ops[ind] = random.choice(available)
-                        new_spec = api.ModelSpec(new_matrix, new_ops.tolist())
-                        if benchmark.is_valid(new_spec):
-                            pop_new_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
-                            pop_new_hashX.append(benchmark.get_module_hash(new_spec))
-                            break
+                    # In expectation, one op is resampled.
+                    op_mutation_prob = 1 / 5
+                    for ind in range(1, 7 - 1):
+                        if random.random() < op_mutation_prob:
+                            available = [o for o in benchmark_api.config['available_ops'] if o != new_ops[ind]]
+                            new_ops[ind] = random.choice(available)
+                    new_spec = api.ModelSpec(new_matrix, new_ops.tolist())
+
+                    if benchmark_api.is_valid(new_spec):
+                        module_hash_spec = benchmark_api.get_module_hash(new_spec)
+                        if (module_hash_spec not in offspring_hashX) and (
+                                module_hash_spec not in pop_hashX):
+                            offspring_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
+                            offspring_hashX.append(module_hash_spec)
+
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
                 # Co the xay ra dot bien o nhieu vi tri
                 mutation_pts = np.random.rand(pop_X.shape[0], pop_X.shape[1])

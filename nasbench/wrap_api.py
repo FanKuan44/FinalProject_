@@ -14,11 +14,13 @@ from nasbench.lib import model_spec as _model_spec
 import numpy as np
 import tensorflow as tf
 import pickle
+
 # Bring ModelSpec to top-level for convenience. See lib/model_spec.py.
 ModelSpec = _model_spec.ModelSpec
 
+
 class OutOfDomainError(Exception):
-  """Indicates that the requested graph is outside of the search domain."""
+    """Indicates that the requested graph is outside of the search domain."""
 
 
 class NASBench_(NASBench):
@@ -54,17 +56,13 @@ class NASBench_(NASBench):
             Raises:
               OutOfDomainError: if model_spec or num_epochs is outside the search space.
             """
-        if epochs not in self.valid_epochs:
-            raise OutOfDomainError('invalid number of epochs, must be one of %s'
-                                   % self.valid_epochs)
-
         fixed_stat, computed_stat = self.get_metrics_from_spec(model_spec)
 
         computed_stat_0 = computed_stat[epochs][0]
         computed_stat_1 = computed_stat[epochs][1]
         computed_stat_2 = computed_stat[epochs][2]
 
-        data = {}
+        data = dict()
         data['module_adjacency'] = fixed_stat['module_adjacency']
         data['module_operations'] = fixed_stat['module_operations']
         data['trainable_parameters'] = fixed_stat['trainable_parameters']

@@ -34,11 +34,6 @@ import matplotlib.pyplot as plt
 # =========================================================================================================
 from nasbench import wrap_api as api
 
-NASBENCH_TFRECORD = 'nasbench/nasbench_only108.tfrecord'
-
-
-# benchmark = api.NASBench_(NASBENCH_TFRECORD)
-
 
 def find_better_idv(f1, f2):
     if (f1[0] <= f2[0] and f1[1] < f2[1]) or (f1[0] < f2[0] and f1[1] <= f2[1]):
@@ -186,11 +181,14 @@ class NSGANet(GeneticAlgorithm):
         self.dpf = []
         self.no_eval = []
 
-        self.benchmark = benchmark
         self.path = path
 
+        self.benchmark_api = None
         if benchmark == 'nas101':
             self.pf_true = pickle.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+            NASBENCH_TFRECORD = 'nasbench/nasbench_only108.tfrecord'
+            benchmark_api = api.NASBench_(NASBENCH_TFRECORD)
+            self.benchmark_api = benchmark_api
         elif benchmark == 'cifar10':
             self.pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
         elif benchmark == 'cifar100':
@@ -598,6 +596,12 @@ class NSGANet(GeneticAlgorithm):
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
     def _finalize(self):
+        plt.scatter(self.pf_true[:, 0], self.pf_true[:, 1], facecolors='none', edgecolors='blue', s=30, label='True PF')
+        plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=10, label='Elitist Archive')
+        plt.legend()
+        plt.savefig(f'{self.path}/final_pf')
+        plt.clf()
+
         pickle.dump([self.no_eval, self.dpf], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
         plt.plot(self.no_eval, self.dpf)
         plt.xlabel('No.Evaluations')
@@ -605,6 +609,7 @@ class NSGANet(GeneticAlgorithm):
         plt.grid()
         plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
         plt.clf()
+
 
 # ---------------------------------------------------------------------------------------------------------
 # Binary Tournament Selection Function

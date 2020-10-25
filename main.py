@@ -14,9 +14,6 @@ from pymoo.optimize import minimize
 
 from nasbench import wrap_api as api
 
-# NASBENCH_TFRECORD = 'nasbench/nasbench_only108.tfrecord'
-# benchmark_api = api.NASBench_(NASBENCH_TFRECORD)
-
 # update your projecty root path before running
 sys.path.insert(0, '/path/to/nsga-net')
 
@@ -41,7 +38,6 @@ parser.add_argument('--local_search_on_pf', type=int, default=0, help='local sea
 parser.add_argument('--local_search_on_knee', type=int, default=0, help='local search on knee solutions')
 parser.add_argument('--bosman_version', type=int, default=0,
                     help='local search on bosman version')
-
 
 args = parser.parse_args()
 
@@ -73,14 +69,13 @@ class NAS(MyProblem):
         F = np.full((x.shape[0], self.n_obj), np.nan)
 
         if self.problem_name == 'nas101':
-            benchmark = kwargs['algorithm'].benchmark
+            benchmark_api = kwargs['algorithm'].benchmark_api
             for i in range(x.shape[0]):
                 cell = api.ModelSpec(matrix=np.array(x[i][:-1, :], dtype=np.int), ops=x[i][-1, :].tolist())
-                # data = benchmark.query(cell)
-                module_hash = benchmark.get_module_hash(cell)
+                module_hash = benchmark_api.get_module_hash(cell)
 
-                F[i, 0] = (self.benchmark_data[module_hash]['training_time'] - self.min_max['min_training_time']) / (
-                        self.min_max['max_training_time'] - self.min_max['min_training_time'])
+                F[i, 0] = (self.benchmark_data[module_hash]['params'] - self.min_max['min_model_params']) / (
+                        self.min_max['max_model_params'] - self.min_max['min_model_params'])
                 F[i, 1] = 1 - self.benchmark_data[module_hash]['val_acc']
 
                 self._n_evaluated += 1
@@ -94,7 +89,8 @@ class NAS(MyProblem):
                 F[i, 1] = 1 - self.benchmark_data[x_str]['val_acc'] / 100
 
                 self._n_evaluated += 1
-        out["F"] = F
+
+        out['F'] = F
         if check:
             return F
 
@@ -121,10 +117,10 @@ def cal_dpf(pareto_front, pareto_s):
 
 def do_every_generations(algorithm):
     gen = algorithm.n_gen
-    # print("Gen:", gen)
+    print('Gen:', gen)
 
     if args.save == 1:
-        """ Write down on File Log """
+        ''' Write down on File Log '''
         logfile.write('-' * 20)
         logfile.write(f' Gen {algorithm.n_gen} ')
         logfile.write('-' * 20)
@@ -138,14 +134,14 @@ def do_every_generations(algorithm):
         pickle.dump([pf, algorithm.problem._n_evaluated],
                     open(f'{algorithm.path}/pf_eval/pf_and_evaluated_gen_{gen}.p', 'wb'))
 
-        ''' Plot pareto front / elitist archive '''
-        # plt.scatter(pf[:, 1], pf[:, 0], c='blue', s=15, label='Elitist Archive')
-        # plt.scatter(algorithm.pf_true[:, 1], algorithm.pf_true[:, 0], s=30, edgecolors='red', facecolors='none',
-        #             label='True PF')
-        # plt.title(f'Gen {gen}')
-        # plt.legend()
-        # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
-        # plt.clf()
+    # ''' Plot pareto front / elitist archive '''
+    # plt.scatter(pf[:, 1], pf[:, 0], c='blue', s=15, label='Elitist Archive')
+    # plt.scatter(algorithm.pf_true[:, 1], algorithm.pf_true[:, 0], s=30, edgecolors='red', facecolors='none',
+    #             label='True PF')
+    # plt.title(f'Gen {gen}')
+    # plt.legend()
+    # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
+    # plt.clf()
 
 
 if __name__ == '__main__':
@@ -223,7 +219,7 @@ if __name__ == '__main__':
                 if args.opt_val_acc_and_training_time == 1:
                     logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; Training Time (normalize)]\n\n')
                 else:
-                    logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; Model Parameters]\n\n')
+                    logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; Model Parameters (normalize)]\n\n')
             elif args.benchmark_name == 'cifar10' or args.benchmark_name == 'cifar100':
                 logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; MMACs (normalize)]\n\n')
             logfile.write('*' * 50)

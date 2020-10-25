@@ -12,7 +12,7 @@ class MySampling(Sampling):
         pop_hashX = []
         pop_F = []
         if problem.problem_name == 'nas101':
-            benchmark = kwargs['algorithm'].benchmark
+            benchmark_api = kwargs['algorithm'].benchmark_api
             INPUT = 'input'
             OUTPUT = 'output'
             CONV3X3 = 'conv3x3-bn-relu'
@@ -30,8 +30,8 @@ class MySampling(Sampling):
                     ops[0][-1] = OUTPUT
                     spec = api.ModelSpec(matrix=matrix, ops=ops[0].tolist())
 
-                    if benchmark.is_valid(spec):
-                        module_hash_spec = benchmark.get_module_hash(spec)
+                    if benchmark_api.is_valid(spec):
+                        module_hash_spec = benchmark_api.get_module_hash(spec)
                         if module_hash_spec not in pop_hashX:
                             X = np.concatenate((matrix, ops), axis=0)
                             F = kwargs['algorithm'].evaluator.eval(
