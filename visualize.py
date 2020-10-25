@@ -238,110 +238,72 @@ def visualize_pf_approximate_2_algorithm(path1, path2, benchmark=None, visualize
         plt.clf()
 
 
-"""------ Visualize "Distance from Pareto Front True to Pareto Front Approximate" and "Number of Evaluations" ------"""
+'''------ Visualize "Distance from True Pareto Front to Approximate Pareto Front " and "Number of Evaluations" ------'''
 
 
-def cal_euclid_distance(x1, x2):
-    e_dis = np.sqrt(np.sum((x1 - x2) ** 2))
-    return e_dis
-
-
-def cal_dpf(pareto_front, pareto_s):
-    d = 0
-    for solution in pareto_front:
-        d_ = np.inf
-        for solution_ in pareto_s:
-            d_ = min(cal_euclid_distance(solution, solution_), d_)
-        d += d_
-    return d / len(pareto_front)
-
-
-def get_avg_dpf_and_evaluate(paths, pf_true):
-    dpf_avg_each_path = []
-    no_eval_avg_each_path = []
+def get_avg_dpfs_and_no_evaluations(paths):
+    dpfs_avg_each_path = []
+    no_evaluations_avg_each_path = []
 
     for path in paths:
-        dpf_each_exp = []
-        no_eval_each_exp = []
+        dpfs_each_exp = []
+        no_evaluations_each_exp = []
 
-        number_of_folders = len(os.listdir(path))
-        min_eval = np.inf
-        eval_gen_0 = 0
-        for i in range(number_of_folders):
-            path_ = path + f'/{i}/pf_eval'
-            pf_and_eval_folder = os.listdir(path_)
+        number_of_experiments = len(os.listdir(path))
+        min_total_no_evaluations = np.inf
+        no_evaluations_gen_0 = 0
 
-            # Sort file by name follow alphabet
-            pf_and_eval_folder = sorted(pf_and_eval_folder, key=lambda x: int(x.split('_')[-1][:-2]))
+        for i in range(number_of_experiments):
+            path_ = path + f'/{i}'
+            total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_dpfs.p', 'rb'))
 
-            _, no_eval = pickle.load(open(path_ + '/' + pf_and_eval_folder[-1], 'rb'))
-            _, eval_gen_0 = pickle.load(open(path_ + '/' + pf_and_eval_folder[0], 'rb'))
+            no_evaluations_gen_0 = total_no_evaluations[0]
+            min_total_no_evaluations = min(min_total_no_evaluations, total_no_evaluations[-1])
 
-            min_eval = min(min_eval, no_eval)
+        max_total_no_evaluations = min_total_no_evaluations // no_evaluations_gen_0 * no_evaluations_gen_0
 
-        upper = min_eval // eval_gen_0 * eval_gen_0
+        for i in range(number_of_experiments):
+            path_ = path + f'/{i}'
 
-        for i in range(number_of_folders):
-            path_ = path + f'/{i}/pf_eval'
-            pf_and_eval_folder = os.listdir(path_)
-
-            # Sort files by name
-            pf_and_eval_folder = sorted(pf_and_eval_folder, key=lambda x: int(x.split('_')[-1][:-2]))
-
-            dpf_each_gen = []
-            no_eval_each_gen = []
-
-            for file in pf_and_eval_folder:
-                pf_approximate, no_eval = pickle.load(open(path_ + '/' + file, 'rb'))
-
-                dpf = cal_dpf(pareto_front=pf_true, pareto_s=pf_approximate)
-
-                dpf_each_gen.append(dpf)
-                no_eval_each_gen.append(no_eval)
+            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_dpfs.p', 'rb'))
 
             # Interpolation
-            new_no_eval_each_gen = np.arange(eval_gen_0, upper + eval_gen_0, eval_gen_0)
+            new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + no_evaluations_gen_0,
+                                             no_evaluations_gen_0)
 
-            f = interp1d(no_eval_each_gen, dpf_each_gen)
+            f = interp1d(total_no_evaluations, total_dpfs)
             new_dpf_each_gen = f(new_no_eval_each_gen)
 
-            dpf_each_exp.append(new_dpf_each_gen)
-            no_eval_each_exp.append(new_no_eval_each_gen)
+            dpfs_each_exp.append(new_dpf_each_gen)
+            no_evaluations_each_exp.append(new_no_eval_each_gen)
 
-        dpf_each_exp = np.array(dpf_each_exp)
-        no_eval_each_exp = np.array(no_eval_each_exp)
+        dpfs_each_exp = np.array(dpfs_each_exp)
+        no_evaluations_each_exp = np.array(no_evaluations_each_exp)
 
-        dpf_avg = np.sum(dpf_each_exp, axis=0) / len(dpf_each_exp)
-        no_eval_avg = np.sum(no_eval_each_exp, axis=0) / len(no_eval_each_exp)
+        dpf_avg = np.sum(dpfs_each_exp, axis=0) / len(dpfs_each_exp)
+        no_eval_avg = np.sum(no_evaluations_each_exp, axis=0) / len(no_evaluations_each_exp)
 
-        dpf_avg_each_path.append(dpf_avg)
-        no_eval_avg_each_path.append(no_eval_avg)
+        dpfs_avg_each_path.append(dpf_avg)
+        no_evaluations_avg_each_path.append(no_eval_avg)
 
-    return dpf_avg_each_path, no_eval_avg_each_path
+    return dpfs_avg_each_path, no_evaluations_avg_each_path
 
 
-def visualize_dpf_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig=False, save_fig=False):
-    pf_true = None
-    if benchmark == 'nas101':
-        pf_true = pickle.load(open('101_benchmark/pf_valerror_trainingtime.p', 'rb'))
-    elif benchmark == 'cifar10':
-        pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
-    elif benchmark == 'cifar100':
-        pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
-
-    dpf_avg_each_path, no_eval_avg_each_path = get_avg_dpf_and_evaluate(paths, pf_true)
+def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False):
+    dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
-    axis_lbs = ['No.Evaluations', 'DPF']
-    colors = ['red', 'blue', 'green']
+    axis_lbs = ['No.Evaluations', 'DPFS']
+    colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[2:5]
+        label = paths[i].split('_')[1:5]
 
-        visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=dpf_avg_each_path[i], place_to_plot=ax,
+        visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
 
     plt.grid()
-    plt.title(f'{benchmark}')
+    title = paths[-1].split('_')[0]
+    plt.title(title)
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
@@ -350,7 +312,7 @@ def visualize_dpf_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig
     plt.clf()
 
 
-"""------------ Visualize "Hyper-Volume of Pareto Front Approximate" and "Number of Evaluations" ------------"""
+'''------------ Visualize "Hyper-Volume of Pareto Front Approximate" and "Number of Evaluations" ------------'''
 
 
 def find_max_f0_f1_min_f0_f1(paths):
@@ -375,11 +337,11 @@ def find_max_f0_f1_min_f0_f1(paths):
             for file_i in range(number_of_files):
                 pf_approximate, _ = pickle.load(open(path_ + '/' + pf_and_eval_folder[file_i], 'rb'))
 
-                min_f0 = min(min_f0, pf_approximate[-1, 0])
-                max_f0 = max(max_f0, pf_approximate[0, 0])
+                min_f0 = min(min_f0, pf_approximate[0, 0])
+                max_f0 = max(max_f0, pf_approximate[-1, 0])
 
-                min_f1 = min(min_f1, pf_approximate[0, 1])
-                max_f1 = max(max_f1, pf_approximate[-1, 1])
+                min_f1 = min(min_f1, pf_approximate[-1, 1])
+                max_f1 = max(max_f1, pf_approximate[0, 1])
 
     return min_f0, max_f0, min_f1, max_f1
 
@@ -387,6 +349,7 @@ def find_max_f0_f1_min_f0_f1(paths):
 def cal_hyper_volume(pareto_front, min_f0, max_f0, min_f1, max_f1):
     rf = [max_f0 + 1e-5, max_f1 + 1e-5]
     tmp = [rf[0] - min_f0, rf[1] - min_f1]
+    # tmp = [rf[0], rf[1]]
 
     hyper_volume = pg.hypervolume(pareto_front.tolist())
     hyper_volume = hyper_volume.compute(rf)
@@ -465,21 +428,22 @@ def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
     return hp_avg_each_path, no_eval_avg_each_path
 
 
-def visualize_hp_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig=False, save_fig=False):
+def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False):
     min_f0, max_f0, min_f1, max_f1 = find_max_f0_f1_min_f0_f1(paths)
     hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1)
 
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', '1 - Hypervolume']
-    colors = ['red', 'blue', 'green']
+    colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[2:5]
+        label = paths[i].split('_')[1:5]
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
 
     plt.grid()
-    plt.title(f'{benchmark}')
+    title = paths[-1].split('_')[0]
+    plt.title(title)
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'hp_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
@@ -488,27 +452,25 @@ def visualize_hp_and_no_evaluations_2_algorithm(paths, benchmark=None, show_fig=
     plt.clf()
 
 
-"""------------------------------------ Main ------------------------------------"""
+''' ------------------------------------ Main ------------------------------------ '''
 
 
 def main():
-    path_1 = 'cifar10_popsize_100_True_False_24_10_2020_13_32_34'
-    path_2 = 'cifar10_popsize_100_False_False_24_10_2020_13_46_12'
-    path_3 = 'nas101_popsize_100_True_False_13_10_2020_10_05_31'
+    path_1 = 'cifar10_100_False_True_True_25_10_03_13'
+    path_2 = 'cifar10_100_True_False_True_25_10_03_19'
+    path_3 = 'cifar10_100_True_False_False_25_10_03_24'
+    path_4 = 'cifar10_100_False_True_False_25_10_03_27'
+    path_5 = 'cifar10_100_False_False_False_25_10_03_33'
 
-    paths = [path_1, path_2]
+    paths = [path_1, path_2, path_3, path_4, path_5]
 
-    benchmark = path_1.split('_')[0]
-
-    visualize_dpf_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark,
-                                                 show_fig=False, save_fig=True)
+    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=False, save_fig=True)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    visualize_hp_and_no_evaluations_2_algorithm(paths=paths, benchmark=benchmark, show_fig=False, save_fig=True)
+    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=False, save_fig=True)
 
 
 if __name__ == '__main__':
     main()
-

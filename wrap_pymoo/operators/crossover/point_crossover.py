@@ -127,7 +127,8 @@ class MyPointCrossover:
             number_of_crossover += 1
         offspring_X = np.array(offspring_X)[:len(pop_X)]
         offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
-
+        if flag:
+            print('Exist Duplicate')
         ''' USING FOR CHECKING DUPLICATE '''
         # if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
         #     print('DUPLICATE')

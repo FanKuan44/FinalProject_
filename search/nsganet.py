@@ -104,7 +104,7 @@ def cal_angle(p_middle, p_top, p_bot):
     cosine_angle = (x1[0] * x2[0] + x1[1] * x2[1]) / (np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)))
 
     angle = np.arccos(cosine_angle)
-    print(x1, x2, p_top, p_middle, p_bot, np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)), np.degrees(angle))
+    # print(x1, x2, p_top, p_middle, p_bot, np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)), np.degrees(angle))
     # print(p_top, p_middle, p_bot, np.degrees(angle), 180 - np.degrees(angle))
     return 360 - np.degrees(angle)
 
@@ -153,7 +153,7 @@ def cal_euclid_distance(x1, x2):
     return e_dis
 
 
-def cal_dpf(pareto_front, pareto_s):
+def cal_dpfs(pareto_front, pareto_s):
     pareto_s = np.unique(pareto_s, axis=0)
     d = 0
     for solution in pareto_front:
@@ -165,8 +165,8 @@ def cal_dpf(pareto_front, pareto_s):
 
 
 class NSGANet(GeneticAlgorithm):
-    def __init__(self, benchmark, local_search_on_pf, local_search_on_knee, local_search_on_pf_bosman,
-                 local_search_on_knee_bosman, path, opt_val_acc_and_training_time=1, **kwargs):
+    def __init__(self, benchmark, local_search_on_pf, local_search_on_knee, bosman_version, path,
+                 opt_val_acc_and_training_time=1, **kwargs):
         kwargs['individual'] = Individual(rank=np.inf, crowding=-1)
         super().__init__(**kwargs)
 
@@ -175,8 +175,7 @@ class NSGANet(GeneticAlgorithm):
 
         self.local_search_on_pf = local_search_on_pf
         self.local_search_on_knee = local_search_on_knee
-        self.local_search_on_pf_bosman = local_search_on_pf_bosman
-        self.local_search_on_knee_bosman = local_search_on_knee_bosman
+        self.bosman_version = bosman_version
 
         self.opt_val_acc_and_training_time = opt_val_acc_and_training_time
 
@@ -190,12 +189,13 @@ class NSGANet(GeneticAlgorithm):
         self.benchmark = benchmark
         self.path = path
 
-        # if benchmark == 'nas101':
-        #     self.pf_true = pickle.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
-        # elif benchmark == 'cifar10':
-        #     self.pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
-        # elif benchmark == 'cifar100':
-        #     self.pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+        if benchmark == 'nas101':
+            self.pf_true = pickle.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+        elif benchmark == 'cifar10':
+            self.pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+        elif benchmark == 'cifar100':
+            self.pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+        self.pf_true[:, 0], self.pf_true[:, 1] = self.pf_true[:, 1], self.pf_true[:, 0].copy()
 
     def _initialize(self):
         pop = Population(n_individuals=0, individual=self.individual)
@@ -234,28 +234,12 @@ class NSGANet(GeneticAlgorithm):
 
             pareto_front = pareto_front[np.argsort(f_pareto_front[:, 1])]
 
-            pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                self.local_search_on_X(pop, X=pareto_front)
-            pop[front_0] = pareto_front
-
-            ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-                update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-        ''' Local Search on PF (Bosman version) '''
-        if self.local_search_on_pf_bosman == 1:
-            pop_F = pop.get('F')
-
-            front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
-
-            pareto_front = pop[front_0].copy()
-            f_pareto_front = pop_F[front_0].copy()
-
-            pareto_front = pareto_front[np.argsort(f_pareto_front[:, 1])]
-
-            pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                self.local_search_on_X_bosman(pop, X=pareto_front)
+            if self.bosman_version == 1:
+                pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+                    self.local_search_on_X_bosman(pop, X=pareto_front)
+            else:
+                pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+                    self.local_search_on_X(pop, X=pareto_front)
             pop[front_0] = pareto_front
 
             ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
@@ -271,6 +255,7 @@ class NSGANet(GeneticAlgorithm):
 
             pareto_front = pop[front_0].copy()
             f_pareto_front = pop_F[front_0].copy()
+
             # Test
             f_pareto_front_normalize = pop_F[front_0].copy()
             min_f1 = np.min(f_pareto_front[:, 1])
@@ -281,26 +266,26 @@ class NSGANet(GeneticAlgorithm):
 
             pareto_front = pareto_front[new_idx]
             f_pareto_front = f_pareto_front[new_idx]
-
             f_pareto_front_normalize = f_pareto_front_normalize[new_idx]
-
-            # plt.plot(f_pareto_front_normalize[:, 0], f_pareto_front_normalize[:, 1], label='True PF')
-            plt.scatter(f_pareto_front_normalize[:, 0], f_pareto_front_normalize[:, 1], s=30, edgecolors='blue',
-                        facecolors='none', label='True PF')
 
             angle = [np.array([360, 0])]
             for i in range(1, len(f_pareto_front) - 1):
-                tren_hay_duoi = kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(f_pareto_front[i], f_pareto_front[i - 1],
-                                                                         f_pareto_front[i + 1])
-                if tren_hay_duoi == 'duoi':
-                    # angle.append(
-                    #     np.array([cal_angle(p_middle=f_pareto_front[i], p_top=f_pareto_front[i - 1],
-                    #                         p_bot=f_pareto_front[i + 1]), i]))
-                    angle.append(
-                        np.array([cal_angle(p_middle=f_pareto_front_normalize[i], p_top=f_pareto_front_normalize[i - 1],
-                                            p_bot=f_pareto_front_normalize[i + 1]), i]))
-                else:
+                if (np.sum(f_pareto_front[i - 1] - f_pareto_front[i]) == 0) or (
+                        np.sum(f_pareto_front[i] - f_pareto_front[i + 1]) == 0):
                     angle.append(np.array([0, i]))
+                else:
+                    tren_hay_duoi = kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(f_pareto_front[i], f_pareto_front[i - 1],
+                                                                             f_pareto_front[i + 1])
+                    if tren_hay_duoi == 'duoi':
+                        # angle.append(
+                        #     np.array([cal_angle(p_middle=f_pareto_front[i], p_top=f_pareto_front[i - 1],
+                        #                         p_bot=f_pareto_front[i + 1]), i]))
+                        angle.append(
+                            np.array(
+                                [cal_angle(p_middle=f_pareto_front_normalize[i], p_top=f_pareto_front_normalize[i - 1],
+                                           p_bot=f_pareto_front_normalize[i + 1]), i]))
+                    else:
+                        angle.append(np.array([0, i]))
 
             angle.append(np.array([360, len(pareto_front) - 1]))
             angle = np.array(angle)
@@ -312,14 +297,19 @@ class NSGANet(GeneticAlgorithm):
 
             idx_knee_solutions = np.array(angle[:, 1], dtype=np.int)
             knee_solutions = pareto_front[idx_knee_solutions].copy()
+
+            # plt.scatter(f_pareto_front[:, 0], f_pareto_front[:, 1], s=30, edgecolors='blue',
+            #             facecolors='none', label='True PF')
             # f_knee_solutions = f_pareto_front[idx_knee_solutions]
-            f_knee_solutions_normalize = f_pareto_front_normalize[idx_knee_solutions]
+            # plt.scatter(f_knee_solutions[:, 0], f_knee_solutions[:, 1], c='red', s=15,
+            #             label='Knee Solutions')
 
-            plt.scatter(f_knee_solutions_normalize[:, 0], f_knee_solutions_normalize[:, 1], c='red', s=15,
-                        label='Knee Solutions')
-
-            knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                self.local_search_on_X(pop, X=knee_solutions)
+            if self.bosman_version == 1:
+                knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+                    self.local_search_on_X_bosman(pop, X=knee_solutions)
+            else:
+                knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+                    self.local_search_on_X(pop, X=knee_solutions)
 
             ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
             self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
@@ -329,7 +319,6 @@ class NSGANet(GeneticAlgorithm):
             pareto_front[idx_knee_solutions] = knee_solutions
 
             pop[front_0] = pareto_front
-        """----------------------------------------------------------------------------"""
         return pop
 
     def local_search_on_X(self, pop, X):
@@ -481,22 +470,21 @@ class NSGANet(GeneticAlgorithm):
         # print('--> INITIALIZE - DONE')
 
         ''' CALCULATE DPFS EACH GEN '''
-        # dpf = round(cal_dpf(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
-        # self.dpf.append(dpf)
-        # self.no_eval.append(self.problem._n_evaluated)
+        dpf = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
+        self.dpf.append(dpf)
+        self.no_eval.append(self.problem._n_evaluated)
 
         self._each_iteration(self, first=True)
 
         # while termination criteria not fulfilled
         while termination.do_continue(self):
             self.n_gen += 1
-            print('Gen:', self.n_gen)
             self.pop = self._next(self.pop)
 
             ''' CALCULATE DPFS EACH GEN '''
-            # dpf = round(cal_dpf(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
-            # self.dpf.append(dpf)
-            # self.no_eval.append(self.problem._n_evaluated)
+            dpf = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
+            self.dpf.append(dpf)
+            self.no_eval.append(self.problem._n_evaluated)
 
             self._each_iteration(self)
 
@@ -609,20 +597,14 @@ class NSGANet(GeneticAlgorithm):
 
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
-    # def _finalize(self):
-    # plt.plot(self.no_eval, self.dpf)
-    # plt.xlabel('No.Evaluations')
-    # plt.ylabel('DPFS')
-    # plt.grid()
-    # plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
-    # plt.clf()
-
-    # pf = np.array(self.elitist_archive_F)
-    # pf = np.unique(pf, axis=0)
-    # plt.scatter(pf[:, 1], pf[:, 0], c='blue')
-    # plt.savefig('xxxxx')
-    # plt.clf()
-
+    def _finalize(self):
+        pickle.dump([self.no_eval, self.dpf], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
+        plt.plot(self.no_eval, self.dpf)
+        plt.xlabel('No.Evaluations')
+        plt.ylabel('DPFS')
+        plt.grid()
+        plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
+        plt.clf()
 
 # ---------------------------------------------------------------------------------------------------------
 # Binary Tournament Selection Function

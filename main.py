@@ -39,10 +39,9 @@ parser.add_argument('--save', type=int, default=0, help='save to log file')
 parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
 parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
 parser.add_argument('--local_search_on_knee', type=int, default=0, help='local search on knee solutions')
-parser.add_argument('--local_search_on_pf_bosman', type=int, default=0,
-                    help='local search on pareto front (bosman version)')
-parser.add_argument('--local_search_on_knee_bosman', type=int, default=0,
-                    help='local search on knee solutions (bosman version)')
+parser.add_argument('--bosman_version', type=int, default=0,
+                    help='local search on bosman version')
+
 
 args = parser.parse_args()
 
@@ -134,7 +133,7 @@ def do_every_generations(algorithm):
 
         pf = algorithm.elitist_archive_F
         pf = pf[np.argsort(pf[:, 0])]
-        # logfile.write(f'# Distance from True Pareto Front to Approximate Pareto Front: {algorithm.dpf[-1]}\n\n')
+        logfile.write(f'# Distance from True Pareto Front to Approximate Pareto Front: {algorithm.dpf[-1]}\n\n')
 
         pickle.dump([pf, algorithm.problem._n_evaluated],
                     open(f'{algorithm.path}/pf_eval/pf_and_evaluated_gen_{gen}.p', 'wb'))
@@ -143,16 +142,27 @@ def do_every_generations(algorithm):
         # plt.scatter(pf[:, 1], pf[:, 0], c='blue', s=15, label='Elitist Archive')
         # plt.scatter(algorithm.pf_true[:, 1], algorithm.pf_true[:, 0], s=30, edgecolors='red', facecolors='none',
         #             label='True PF')
-        plt.title(f'Gen {gen}')
-        plt.legend()
-        plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
-        plt.clf()
+        # plt.title(f'Gen {gen}')
+        # plt.legend()
+        # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
+        # plt.clf()
 
 
 if __name__ == '__main__':
+    print('*** Parameters of NSGANet ***')
+    print('- Population Size:', args.pop_size)
+    print('- Max of no.evaluations:', args.n_eval)
+    print('- Local Search on PF:', bool(args.local_search_on_pf))
+    print('- Local Search on Knee Solutions:', bool(args.local_search_on_knee))
+    print('- Local Search followed by Bosman ver:', bool(args.bosman_version))
+    print('*' * 40)
+    print()
+
+    # Syntax: 'benchmark_name'_'pop_size'_'local_search_on_pf'_'local_search_on_knee'_'bosman_version'
     now = datetime.now()
-    dir_name = now.strftime(f"{args.benchmark_name}_popsize_{args.pop_size}_"
-                            f"{bool(args.local_search_on_pf)}_{bool(args.local_search_on_knee)}_%d_%m_%Y_%H_%M_%S")
+    dir_name = now.strftime(f'{args.benchmark_name}_{args.pop_size}_'
+                            f'{bool(args.local_search_on_pf)}_{bool(args.local_search_on_knee)}_'
+                            f'{bool(args.bosman_version)}_%d_%m_%H_%M')
     path = dir_name
 
     if args.save == 1:
@@ -166,11 +176,10 @@ if __name__ == '__main__':
     for run_i in range(args.number_of_runs):
         seed = args.seed + run_i * 100
         np.random.seed(seed)
-        print(f"---------------------- LAN {run_i} ----------------------")
-        print('Seed:', seed)
+        print(f'---------------------- LAN {run_i} ----------------------')
         if args.save == 1:
             # Name of sub-folder
-            path_ = path + f'/{run_i}/'
+            path_ = path + f'/{run_i}'
 
             # Create sub-folder
             try:
@@ -179,26 +188,26 @@ if __name__ == '__main__':
                 pass
 
             # Open file log
-            logfile = open(path_ + 'log_fife.txt', 'w')
+            logfile = open(path_ + '/log_fife.txt', 'w')
 
             # Create sub-sub-folder (pf_eval)
             try:
-                os.mkdir(path_ + 'pf_eval')
+                os.mkdir(path_ + '/pf_eval')
             except FileExistsError:
                 pass
 
             # Create sub-sub-folder (visualize_pf_each_gen)
             try:
-                os.mkdir(path_ + 'visualize_pf_each_gen')
+                os.mkdir(path_ + '/visualize_pf_each_gen')
             except FileExistsError:
                 pass
 
-            # -------------------------------------------------------------------------------------------------------------
+            # ----------------------------------------------------------------------------------------------------------
             # Write down on log file
-            # -------------------------------------------------------------------------------------------------------------
+            # ----------------------------------------------------------------------------------------------------------
 
             if args.benchmark_name == 'nas101':
-                logfile.write(f'*************************************** NSGA-II ON NAS-BENCHMARK-101 '
+                logfile.write(f'*************************************** NSGA-II ON NASBENCH-101 '
                               f'***************************************\n\n')
             elif args.benchmark_name == 'cifar10':
                 logfile.write(f'*************************************** NSGA-II ON BOSMAN-BENCHMARK-CIFAR10 '
@@ -226,7 +235,8 @@ if __name__ == '__main__':
             logfile.write(f'# Population Size: {args.pop_size}\n')
             logfile.write(f'# Number of Max Evaluate: {args.n_eval}\n')
             logfile.write(f'# Local Search on PF: {bool(args.local_search_on_pf)}\n')
-            logfile.write(f'# Local Search on Knee Solutions: {bool(args.local_search_on_knee)}\n\n')
+            logfile.write(f'# Local Search on Knee Solutions: {bool(args.local_search_on_knee)}\n')
+            logfile.write(f'# Local Search followed by Bosman ver: {bool(args.bosman_version)}\n\n')
             logfile.write('*' * 50)
             logfile.write('\n\n')
         else:
@@ -239,8 +249,7 @@ if __name__ == '__main__':
                                 benchmark=args.benchmark_name,
                                 local_search_on_pf=args.local_search_on_pf,
                                 local_search_on_knee=args.local_search_on_knee,
-                                local_search_on_pf_bosman=args.local_search_on_pf_bosman,
-                                local_search_on_knee_bosman=args.local_search_on_knee_bosman,
+                                bosman_version=args.bosman_version,
                                 path=path_)
 
         res = minimize(problem,
