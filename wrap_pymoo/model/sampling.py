@@ -8,9 +8,8 @@ class MySampling(Sampling):
         super().__init__()
 
     def sample(self, problem, pop, n_samples, **kwargs):
-        pop_X = []
-        pop_hashX = []
-        pop_F = []
+        pop_X, pop_hashX, pop_F = [], [], []
+
         if problem.problem_name == 'nas101':
             benchmark_api = kwargs['algorithm'].benchmark_api
             INPUT = 'input'
@@ -40,27 +39,27 @@ class MySampling(Sampling):
                             pop_X.append(X)
                             pop_hashX.append(module_hash_spec)
                             break
+
         elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
-            allowed_ops = ['I', '1', '2']
+            choices = ['I', '1', '2']
             for i in range(n_samples):
                 while True:
-                    model = np.random.choice(allowed_ops, size=14)
-                    model_str = ''.join(model.tolist())
-                    if model_str not in pop_hashX:
+                    X = np.random.choice(choices, size=14)
+                    hashX = ''.join(X.tolist())
+                    if hashX not in pop_hashX:
                         F = kwargs['algorithm'].evaluator.eval(
-                            problem, np.array([model_str]), check=True, algorithm=kwargs['algorithm'])
+                            problem, np.array([hashX]), check=True, algorithm=kwargs['algorithm'])
                         pop_F.append(F)
-                        pop_X.append(model)
-                        pop_hashX.append(model_str)
+                        pop_X.append(X)
+                        pop_hashX.append(hashX)
                         break
+
         pop_ = pop.new(n_samples)
 
         CV = np.zeros((n_samples, 1))
         feasible = np.ones((n_samples, 1), dtype=np.bool)
 
-        pop_X = np.array(pop_X)
-        pop_hashX = np.array(pop_hashX)
-        pop_F = np.array(pop_F)
+        pop_X, pop_hashX, pop_F = np.array(pop_X), np.array(pop_hashX), np.array(pop_F)
 
         pop_.set('X', np.array(pop_X))
         pop_.set('hashX', np.array(pop_hashX))

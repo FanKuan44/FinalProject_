@@ -13,7 +13,7 @@ from wrap_pymoo.operators.mutation.mutation import Mutation
 from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.model.sampling import MySampling as Sampling
-
+from wrap_pymoo.util.dpfs_calculating import cal_dpfs
 # from pymoo.model.population import Population
 
 from pymoo.model.survival import Survival
@@ -35,54 +35,67 @@ import matplotlib.pyplot as plt
 from nasbench import wrap_api as api
 
 
-def find_better_idv(f1, f2):
-    if (f1[0] <= f2[0] and f1[1] < f2[1]) or (f1[0] < f2[0] and f1[1] <= f2[1]):
-        return 1
-    if (f2[0] <= f1[0] and f2[1] < f1[1]) or (f2[0] < f1[0] and f2[1] <= f1[1]):
-        return 2
+def find_better_idv(f1, f2, position=None):
+    """
+    Kiem tra xem ca the nao tot hon.
+    Neu ca the do nam o vi tri dau hoac cuoi thi chi xet 1 trong 2 fitness value, con lai thi xet binh thuong.
+    =========================================================================================================
+
+    Parameters:
+    ----------
+    :param f1: fitness value of first individual
+    :param f2: fitness value of second individual
+    :param position: position of individual in pareto front or set of knee solutions (first, last, none)
+    =========================================================================================================
+
+    Returns:
+    ------
+    :return:
+    1: individual 1
+    2: individual 2
+    0: non-dominated
+    """
+    if position is None:
+        if (f1[0] <= f2[0] and f1[1] < f2[1]) or (f1[0] < f2[0] and f1[1] <= f2[1]):
+            return 1
+        if (f2[0] <= f1[0] and f2[1] < f1[1]) or (f2[0] < f1[0] and f2[1] <= f1[1]):
+            return 2
+    elif position == 'first':
+        if f1[0] < f2[0]:
+            return 1
+        if f2[0] <= f1[0]:
+            return 2
+    else:
+        if f1[1] < f2[1]:
+            return 1
+        if f2[1] <= f1[1]:
+            return 2
     return 0
 
 
 def find_better_idv_bosman_ver(alpha, f1, f2):
-    f1_ = alpha * f1[0] + (1 - alpha) * f1[1]
-    f2_ = alpha * f2[0] + (1 - alpha) * f2[1]
-    if f1_ <= f2_:
+    """
+    Kiem tra xem ca the nao tot hon theo paper cua Bosman.
+    Ngau nhien 1 gia tri alpha, tinh lai fitness value cua tung individual theo alpha va so sanh.
+    =========================================================================================================
+
+    Parameters:
+    -----------
+    :param alpha: value of alpha
+    :param f1: the old fitness value of first individual
+    :param f2: the old fitness value of first individual
+    =========================================================================================================
+
+    Returns:
+    :return:
+    1: individual 1
+    2: individual 2
+    """
+    f1_new = alpha * f1[0] + (1 - alpha) * f1[1]
+    f2_new = alpha * f2[0] + (1 - alpha) * f2[1]
+    if f1_new < f2_new:
         return 1
-    else:
-        return 2
-
-
-def check_off_not_in(f_off, f_check):
-    checked = []
-    checked_ = []
-    for i in range(len(f_off)):
-        flag = True
-        for j in f_check:
-            if np.sum(f_off[i] - j) == 0:
-                flag = False
-                break
-        if flag:
-            flag_ = True
-            for x in checked_:
-                if np.sum(f_off[i] - x) == 0:
-                    flag_ = False
-                    break
-            if flag_:
-                checked.append(i)
-                checked_.append(f_off[i])
-    return checked
-
-
-def is_x1_not_duplicate_x2(x1, x2, check_in_self=False):
-    not_duplicated = []
-    for i in range(len(x1)):
-        if check_in_self:
-            if x2.count(x1[i]) == 1:
-                not_duplicated.append(i)
-        else:
-            if x1[i] not in x2:
-                not_duplicated.append(i)
-    return not_duplicated
+    return 2
 
 
 def kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(p1, p2, p3):
@@ -99,8 +112,6 @@ def cal_angle(p_middle, p_top, p_bot):
     cosine_angle = (x1[0] * x2[0] + x1[1] * x2[1]) / (np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)))
 
     angle = np.arccos(cosine_angle)
-    # print(x1, x2, p_top, p_middle, p_bot, np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)), np.degrees(angle))
-    # print(p_top, p_middle, p_bot, np.degrees(angle), 180 - np.degrees(angle))
     return 360 - np.degrees(angle)
 
 
@@ -143,25 +154,25 @@ def update_elitist_archive(new_idv_X_lst, new_idv_hashX_lst, new_idv_F_lst,
            current_elitist_archive_F
 
 
-def cal_euclid_distance(x1, x2):
-    e_dis = np.sqrt(np.sum((x1 - x2) ** 2))
-    return e_dis
-
-
-def cal_dpfs(pareto_front, pareto_s):
-    pareto_s = np.unique(pareto_s, axis=0)
-    d = 0
-    for solution in pareto_front:
-        d_ = np.inf
-        for solution_ in pareto_s:
-            d_ = min(cal_euclid_distance(solution, solution_), d_)
-        d += d_
-    return d / len(pareto_front)
+# def cal_euclid_distance(x1, x2):
+#     e_dis = np.sqrt(np.sum((x1 - x2) ** 2))
+#     return e_dis
+#
+#
+# def cal_dpfs(pareto_front, pareto_s):
+#     pareto_s = np.unique(pareto_s, axis=0)
+#     d = 0
+#     for solution in pareto_front:
+#         d_ = np.inf
+#         for solution_ in pareto_s:
+#             d_ = min(cal_euclid_distance(solution, solution_), d_)
+#         d += d_
+#     return d / len(pareto_front)
 
 
 class NSGANet(GeneticAlgorithm):
-    def __init__(self, benchmark, local_search_on_pf, local_search_on_knee, bosman_version, path,
-                 opt_val_acc_and_training_time=1, **kwargs):
+    def __init__(self, benchmark, local_search_on_pf, local_search_on_knee, followed_bosman_paper, path, n_points=1,
+                 **kwargs):
         kwargs['individual'] = Individual(rank=np.inf, crowding=-1)
         super().__init__(**kwargs)
 
@@ -170,9 +181,8 @@ class NSGANet(GeneticAlgorithm):
 
         self.local_search_on_pf = local_search_on_pf
         self.local_search_on_knee = local_search_on_knee
-        self.bosman_version = bosman_version
-
-        self.opt_val_acc_and_training_time = opt_val_acc_and_training_time
+        self.n_points = n_points
+        self.followed_bosman_paper = followed_bosman_paper
 
         self.elitist_archive_X = []
         self.elitist_archive_hashX = []
@@ -189,12 +199,15 @@ class NSGANet(GeneticAlgorithm):
             NASBENCH_TFRECORD = 'nasbench/nasbench_only108.tfrecord'
             benchmark_api = api.NASBench_(NASBENCH_TFRECORD)
             self.benchmark_api = benchmark_api
+
         elif benchmark == 'cifar10':
             self.pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+
         elif benchmark == 'cifar100':
             self.pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
         self.pf_true[:, 0], self.pf_true[:, 1] = self.pf_true[:, 1], self.pf_true[:, 0].copy()
 
+    # DONE
     def _initialize(self):
         pop = Population(n_individuals=0, individual=self.individual)
         pop = self.sampling.sample(problem=self.problem, pop=pop, n_samples=self.pop_size, algorithm=self)
@@ -203,15 +216,15 @@ class NSGANet(GeneticAlgorithm):
             pop = self.survival.do(self.problem, pop, self.pop_size, algorithm=self)
 
         ''' UPDATE ELITIST ARCHIVE AFTER INITIALIZE POPULATION '''
-        pop_X = pop.get('X')
-        pop_hashX = pop.get('hashX')
-        pop_F = pop.get('F')
+        pop_X, pop_hashX, pop_F = pop.get('X'), pop.get('hashX'), pop.get('F')
+
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
             update_elitist_archive(pop_X, pop_hashX, pop_F,
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
                                    first=True)
         return pop
 
+    # DONE
     def _next(self, pop):
         self.off = self._mating(pop)
 
@@ -228,16 +241,14 @@ class NSGANet(GeneticAlgorithm):
             front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
 
             pareto_front = pop[front_0].copy()
-            f_pareto_front = pop_F[front_0].copy()
 
-            pareto_front = pareto_front[np.argsort(f_pareto_front[:, 1])]
-
-            if self.bosman_version == 1:
+            if self.followed_bosman_paper == 1:
                 pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X_bosman(pop, X=pareto_front)
+                    self.local_search_on_X_bosman(pop, X=pareto_front, n_points=self.n_points)
             else:
                 pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X(pop, X=pareto_front)
+                    self.local_search_on_X(pop, X=pareto_front, n_points=self.n_points)
+
             pop[front_0] = pareto_front
 
             ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
@@ -254,8 +265,9 @@ class NSGANet(GeneticAlgorithm):
             pareto_front = pop[front_0].copy()
             f_pareto_front = pop_F[front_0].copy()
 
-            # Test
+            # Normalize val_error for calculating angle between two individuals
             f_pareto_front_normalize = pop_F[front_0].copy()
+
             min_f1 = np.min(f_pareto_front[:, 1])
             max_f1 = np.max(f_pareto_front[:, 1])
             f_pareto_front_normalize[:, 1] = (f_pareto_front[:, 1] - min_f1) / (max_f1 - min_f1)
@@ -265,6 +277,7 @@ class NSGANet(GeneticAlgorithm):
             pareto_front = pareto_front[new_idx]
             f_pareto_front = f_pareto_front[new_idx]
             f_pareto_front_normalize = f_pareto_front_normalize[new_idx]
+            front_0 = front_0[new_idx]
 
             angle = [np.array([360, 0])]
             for i in range(1, len(f_pareto_front) - 1):
@@ -275,9 +288,6 @@ class NSGANet(GeneticAlgorithm):
                     tren_hay_duoi = kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(f_pareto_front[i], f_pareto_front[i - 1],
                                                                              f_pareto_front[i + 1])
                     if tren_hay_duoi == 'duoi':
-                        # angle.append(
-                        #     np.array([cal_angle(p_middle=f_pareto_front[i], p_top=f_pareto_front[i - 1],
-                        #                         p_bot=f_pareto_front[i + 1]), i]))
                         angle.append(
                             np.array(
                                 [cal_angle(p_middle=f_pareto_front_normalize[i], p_top=f_pareto_front_normalize[i - 1],
@@ -288,26 +298,24 @@ class NSGANet(GeneticAlgorithm):
             angle.append(np.array([360, len(pareto_front) - 1]))
             angle = np.array(angle)
             angle = angle[np.argsort(angle[:, 0])]
-            # print(angle)
 
             angle = angle[angle[:, 0] > 210]
-            # print(angle)
 
             idx_knee_solutions = np.array(angle[:, 1], dtype=np.int)
             knee_solutions = pareto_front[idx_knee_solutions].copy()
 
+            # f_knee_solutions = f_pareto_front[idx_knee_solutions]
             # plt.scatter(f_pareto_front[:, 0], f_pareto_front[:, 1], s=30, edgecolors='blue',
             #             facecolors='none', label='True PF')
-            # f_knee_solutions = f_pareto_front[idx_knee_solutions]
             # plt.scatter(f_knee_solutions[:, 0], f_knee_solutions[:, 1], c='red', s=15,
             #             label='Knee Solutions')
 
-            if self.bosman_version == 1:
+            if self.followed_bosman_paper == 1:
                 knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X_bosman(pop, X=knee_solutions)
+                    self.local_search_on_X_bosman(pop, X=knee_solutions, n_points=self.n_points)
             else:
                 knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X(pop, X=knee_solutions)
+                    self.local_search_on_X(pop, X=knee_solutions, n_points=self.n_points, ls_on_knee_solutions=True)
 
             ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
             self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
@@ -317,99 +325,140 @@ class NSGANet(GeneticAlgorithm):
             pareto_front[idx_knee_solutions] = knee_solutions
 
             pop[front_0] = pareto_front
+
         return pop
 
-    def local_search_on_X(self, pop, X):
+    def local_search_on_X(self, pop, X, n_points=2, ls_on_knee_solutions=False):
         off_ = pop.new()
         off_ = off_.merge(X)
 
-        x_old_X = off_.get('X')
-        x_old_hashX = off_.get('hashX')
-        x_old_F = off_.get('F')
+        x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
 
-        non_dominance_X = []
-        non_dominance_hashX = []
-        non_dominance_F = []
+        non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
 
-        if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+        first, last = 0, 0
+        if ls_on_knee_solutions:
+            first, last = len(x_old_X) - 2, len(x_old_X) - 1
+
+        if n_points == 1:
+            stop_iter = 30
+
             for i in range(len(x_old_X)):
-                checked = []
-                stop_iter = 14 * 2
+                max_n_searching = 100
+                n_searching = 0
+                checked = [x_old_hashX[i]]
                 j = 0
 
-                best_X = x_old_X[i].copy()
-                best_hashX = x_old_hashX[i].copy()
-                best_F = x_old_F[i].copy()
-
-                while j < stop_iter:
-                    idx = np.random.randint(0, 14)
-                    ops = ['I', '1', '2']
-                    ops.remove(x_old_X[i][idx])
+                while (j < stop_iter) and (n_searching < max_n_searching):
+                    n_searching += 1
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        idx = np.random.randint(0, 14)
+                        ops = ['I', '1', '2']
+                        ops.remove(x_old_X[i][idx])
+                    else:
+                        idx = np.random.randint(1, 6)
+                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops.remove(x_old_X[i][-1][idx])
                     new_op = np.random.choice(ops)
 
-                    if [idx, new_op] not in checked:
-                        checked.append([idx, new_op])
-
-                        x_new_X = x_old_X[i].copy()
+                    x_new_X = x_old_X[i].copy()
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
                         x_new_X[idx] = new_op
 
                         x_new_hashX = ''.join(x_new_X.tolist())
-
-                        if x_new_hashX not in x_old_hashX:
-                            x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                          check=True, algorithm=self)
-                            better_idv = find_better_idv(x_new_F[0], best_F)
-                            if better_idv == 1:
-                                best_X = x_new_X
-                                best_hashX = x_new_hashX
-                                best_F = x_new_F[0]
-
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(x_new_hashX)
-                                non_dominance_F.append(x_new_F[0])
-                            elif better_idv == 0:
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(x_new_hashX)
-                                non_dominance_F.append(x_new_F[0])
-                        j += 1
-                x_old_X[i] = best_X
-                x_old_hashX[i] = best_hashX
-                x_old_F[i] = best_F
-        elif self.problem.problem_name == 'nas101':
-            for i in range(len(x_old_X)):
-                checked = []
-                stop_iter = 5 * 2
-                j = 0
-                while j < stop_iter:
-                    idx = np.random.randint(1, 6)
-                    ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                    ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
-
-                    if [idx, new_op] not in checked:
-                        checked.append([idx, new_op])
-                        x_new_X = x_old_X[i].copy()
+                    else:
                         x_new_X[-1][idx] = new_op
-                        neighbor = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int), ops=x_new_X[-1].tolist())
-                        neighbor_hash = self.benchmark.get_module_hash(neighbor)
 
-                        if neighbor_hash not in x_old_hashX:
-                            neighbor_F = self.evaluator.eval(self.problem, np.array([x_new_X]), check=True,
-                                                             algorithm=self)
-                            better_idv = find_better_idv(neighbor_F[0], x_old_F[i])
-                            if better_idv == 1:
-                                x_old_X[i] = x_new_X
-                                x_old_hashX[i] = neighbor_hash
-                                x_old_F[i] = neighbor_F
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(neighbor_hash)
-                                non_dominance_F.append(neighbor_F[0])
-                                break
-                            elif better_idv == 0:
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(neighbor_hash)
-                                non_dominance_F.append(neighbor_F[0])
+                        module = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+                                               ops=x_new_X[-1].tolist())
+                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        checked.append(x_new_hashX)
                         j += 1
+                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+                                                      check=True, algorithm=self)
+
+                        if i == first and ls_on_knee_solutions:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
+                        elif i == last and ls_on_knee_solutions:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
+                        else:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+
+                        if better_idv == 1:
+                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
+
+                        elif better_idv == 0:
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
+
+        elif n_points == 2:
+            stop_iter = 30
+
+            for i in range(len(x_old_X)):
+                max_n_searching = 100
+                n_searching = 0
+                checked = [x_old_hashX[i]]
+                j = 0
+
+                while (j < stop_iter) and (n_searching < max_n_searching):
+                    n_searching += 1
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        idx = np.random.choice(14, size=2, replace=False)
+                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+                        ops1.remove(x_old_X[i][idx[0]])
+                        ops2.remove(x_old_X[i][idx[1]])
+                    else:
+                        idx = np.random.choice(range(1, 6), size=2, replace=False)
+                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops1.remove(x_old_X[i][-1][idx[0]])
+                        ops2.remove(x_old_X[i][-1][idx[1]])
+
+                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+
+                    x_new_X = x_old_X[i].copy()
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
+
+                        x_new_hashX = ''.join(x_new_X.tolist())
+                    else:
+                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+
+                        module = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+                                               ops=x_new_X[-1].tolist())
+                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        j += 1
+                        checked.append(x_new_hashX)
+
+                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+                                                      check=True, algorithm=self)
+                        if i == first and ls_on_knee_solutions:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
+                        elif i == last and ls_on_knee_solutions:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
+                        else:
+                            better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+
+                        if better_idv == 1:
+                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
+
+                        elif better_idv == 0:
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
 
         non_dominance_X = np.array(non_dominance_X)
         non_dominance_hashX = np.array(non_dominance_hashX)
@@ -421,15 +470,154 @@ class NSGANet(GeneticAlgorithm):
 
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
-    def _mating(self, pop):
-        off = self.crossover.do(problem=self.problem, pop=pop, algorithm=self)
-        # print("--> CROSSOVER - DONE")
+    def local_search_on_X_bosman(self, pop, X, n_points=2):
+        off_ = pop.new()
+        off_ = off_.merge(X)
 
-        ''' EVALUATE OFFSPRINGS AFTER CROSSOVER '''
+        x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
+
+        non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
+
+        if n_points == 1:
+            stop_iter = 30
+
+            for i in range(len(x_old_X)):
+                max_n_searching = 100
+                n_searching = 0
+                checked = [x_old_hashX[i]]
+                j = 0
+                alpha = np.random.rand()
+
+                while (j < stop_iter) and (n_searching < max_n_searching):
+                    n_searching += 1
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        idx = np.random.randint(0, 14)
+                        ops = ['I', '1', '2']
+                        ops.remove(x_old_X[i][idx])
+                    else:
+                        idx = np.random.randint(1, 6)
+                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops.remove(x_old_X[i][-1][idx])
+                    new_op = np.random.choice(ops)
+
+                    x_new_X = x_old_X[i].copy()
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        x_new_X[idx] = new_op
+
+                        x_new_hashX = ''.join(x_new_X.tolist())
+                    else:
+                        x_new_X[-1][idx] = new_op
+
+                        module = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+                                               ops=x_new_X[-1].tolist())
+                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        checked.append(x_new_hashX)
+
+                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+                                                      check=True, algorithm=self)
+                        better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
+
+                        if better_idv == 0:  # Non-dominated solution
+                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
+
+                        else:
+                            better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
+                            if better_idv_ == 1:  # Improved solution
+                                x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                                non_dominance_X.append(x_new_X)
+                                non_dominance_hashX.append(x_new_hashX)
+                                non_dominance_F.append(x_new_F[0])
+                        j += 1
+
+        elif n_points == 2:
+            stop_iter = 30
+
+            for i in range(len(x_old_X)):
+                max_n_searching = 100
+                n_searching = 0
+                checked = [x_old_hashX[i]]
+                j = 0
+                alpha = np.random.rand()
+
+                while (j < stop_iter) and (n_searching < max_n_searching):
+                    n_searching += 1
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        idx = np.random.choice(14, size=2, replace=False)
+                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+                        ops1.remove(x_old_X[i][idx[0]])
+                        ops2.remove(x_old_X[i][idx[1]])
+                    else:
+                        idx = np.random.choice(range(1, 6), size=2, replace=False)
+                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops1.remove(x_old_X[i][-1][idx[0]])
+                        ops2.remove(x_old_X[i][-1][idx[1]])
+
+                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+
+                    x_new_X = x_old_X[i].copy()
+                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
+
+                        x_new_hashX = ''.join(x_new_X.tolist())
+                    else:
+                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+
+                        module = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+                                               ops=x_new_X[-1].tolist())
+                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        checked.append(x_new_hashX)
+
+                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+                                                      check=True, algorithm=self)
+
+                        better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
+
+                        if better_idv == 0:  # Non-dominated solution
+                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            non_dominance_F.append(x_new_F[0])
+
+                        else:
+                            better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
+                            if better_idv_ == 1:  # Improved solution
+                                x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+
+                                non_dominance_X.append(x_new_X)
+                                non_dominance_hashX.append(x_new_hashX)
+                                non_dominance_F.append(x_new_F[0])
+                        j += 1
+        non_dominance_X = np.array(non_dominance_X)
+        non_dominance_hashX = np.array(non_dominance_hashX)
+        non_dominance_F = np.array(non_dominance_F)
+
+        off_.set('X', x_old_X)
+        off_.set('hashX', x_old_hashX)
+        off_.set('F', x_old_F)
+
+        return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
+
+    # DONE
+    def _mating(self, pop):
+        # CROSSOVER
+        off = self.crossover.do(problem=self.problem, pop=pop, algorithm=self)
+
+        # EVALUATE OFFSPRINGS AFTER CROSSOVER
         off_F = self.evaluator.eval(self.problem, off.get('X'), check=True, algorithm=self)
         off.set('F', off_F)
 
-        ''' UPDATE ELITIST ARCHIVE AFTER CROSSOVER '''
+        # UPDATE ELITIST ARCHIVE AFTER CROSSOVER
         off_X = off.get('X')
         off_hashX = off.get('hashX')
         off_F = off.get('F')
@@ -437,15 +625,14 @@ class NSGANet(GeneticAlgorithm):
             update_elitist_archive(off_X, off_hashX, off_F,
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
 
-        ''' MUTATION '''
+        # MUTATION
         off = self.mutation.do(self.problem, off, algorithm=self)
-        # print("--> MUTATION - DONE")
 
-        ''' EVALUATE OFFSPRINGS AFTER MUTATION '''
+        # EVALUATE OFFSPRINGS AFTER MUTATION
         off_F = self.evaluator.eval(self.problem, off.get('X'), check=True, algorithm=self)
         off.set('F', off_F)
 
-        ''' UPDATE ELITIST ARCHIVE AFTER MUTATION '''
+        # UPDATE ELITIST ARCHIVE AFTER MUTATION
         off_X = off.get('X')
         off_hashX = off.get('hashX')
         off_F = off.get('F')
@@ -460,14 +647,14 @@ class NSGANet(GeneticAlgorithm):
         off.set('feasible', feasible)
         return off
 
+    # DONE
     def _solve(self, problem, termination):
         self.n_gen = 0
 
         ''' INITIALIZE '''
         self.pop = self._initialize()
-        # print('--> INITIALIZE - DONE')
 
-        ''' CALCULATE DPFS EACH GEN '''
+        ''' CALCULATE DPFS EACH GEN - USING FOR VISUALIZE'''
         dpf = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
         self.dpf.append(dpf)
         self.no_eval.append(self.problem._n_evaluated)
@@ -477,9 +664,10 @@ class NSGANet(GeneticAlgorithm):
         # while termination criteria not fulfilled
         while termination.do_continue(self):
             self.n_gen += 1
+
             self.pop = self._next(self.pop)
 
-            ''' CALCULATE DPFS EACH GEN '''
+            ''' CALCULATE DPFS EACH GEN - USING FOR VISUALIZE'''
             dpf = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
             self.dpf.append(dpf)
             self.no_eval.append(self.problem._n_evaluated)
@@ -490,114 +678,15 @@ class NSGANet(GeneticAlgorithm):
 
         return self.pop
 
-    def local_search_on_X_bosman(self, pop, X):
-        off_ = pop.new()
-        off_ = off_.merge(X)
-
-        x_old_X = X.get('X')
-        x_old_hashX = X.get('hashX')
-        x_old_F = X.get('F')
-
-        non_dominance_X = []
-        non_dominance_hashX = []
-        non_dominance_F = []
-
-        if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-            for i in range(len(x_old_X)):
-                checked = [x_old_hashX[i]]
-                stop_iter = 20
-                j = 0
-                alpha = np.random.rand()
-
-                while j < stop_iter:
-                    search_pt = np.random.randint(0, 14)
-
-                    ops = ['I', '1', '2']
-                    ops.remove(x_old_X[i][search_pt])
-                    new_op = np.random.choice(ops)
-
-                    tmp = x_old_X[i].copy()
-                    tmp[search_pt] = new_op
-                    tmp_str = ''.join(tmp.tolist())
-
-                    if tmp_str not in checked:  # Chua search tren kien truc nay
-                        checked.append(tmp_str)
-
-                        x_new_X = tmp
-                        x_new_hashX = tmp_str
-
-                        if x_new_hashX not in x_old_hashX:  # Kien truc nay khong co trong X
-                            x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                          check=True, algorithm=self)
-                            better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
-                            if better_idv == 0:  # Non-dominated solution
-                                x_old_X[i] = x_new_X
-                                x_old_hashX[i] = x_new_hashX
-                                x_old_F[i] = x_new_F[0]
-
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(x_new_hashX)
-                                non_dominance_F.append(x_new_F[0])
-                            else:
-                                better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
-                                if better_idv_ == 1:  # Improved solution
-                                    x_old_X[i] = x_new_X
-                                    x_old_hashX[i] = x_new_hashX
-                                    x_old_F[i] = x_new_F[0]
-
-                                    non_dominance_X.append(x_new_X)
-                                    non_dominance_hashX.append(x_new_hashX)
-                                    non_dominance_F.append(x_new_F[0])
-                    j += 1
-        elif self.problem.problem_name == 'nas101':
-            for i in range(len(x_old_X)):
-                checked = []
-                stop_iter = 5 * 2
-                j = 0
-                while j < stop_iter:
-                    idx = np.random.randint(1, 6)
-                    ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                    ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
-
-                    if [idx, new_op] not in checked:
-                        checked.append([idx, new_op])
-                        x_new_X = x_old_X[i].copy()
-                        x_new_X[-1][idx] = new_op
-                        neighbor = api.ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int), ops=x_new_X[-1].tolist())
-                        neighbor_hash = self.benchmark.get_module_hash(neighbor)
-
-                        if neighbor_hash not in x_old_hashX:
-                            neighbor_F = self.evaluator.eval(self.problem, np.array([x_new_X]), check=True,
-                                                             algorithm=self)
-                            better_idv = find_better_idv(neighbor_F[0], x_old_F[i])
-                            if better_idv == 1:
-                                x_old_X[i] = x_new_X
-                                x_old_hashX[i] = neighbor_hash
-                                x_old_F[i] = neighbor_F
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(neighbor_hash)
-                                non_dominance_F.append(neighbor_F[0])
-                                break
-                            elif better_idv == 0:
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(neighbor_hash)
-                                non_dominance_F.append(neighbor_F[0])
-                        j += 1
-
-        non_dominance_X = np.array(non_dominance_X)
-        non_dominance_hashX = np.array(non_dominance_hashX)
-        non_dominance_F = np.array(non_dominance_F)
-
-        off_.set('X', x_old_X)
-        off_.set('hashX', x_old_hashX)
-        off_.set('F', x_old_F)
-
-        return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
-
+    # DONE
     def _finalize(self):
         plt.scatter(self.pf_true[:, 0], self.pf_true[:, 1], facecolors='none', edgecolors='blue', s=30, label='True PF')
         plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=10, label='Elitist Archive')
+        if self.problem.problem_name == 'nas101':
+            plt.xlabel('Params (normalize)')
+        else:
+            plt.xlabel('MMACs (normalize)')
+        plt.ylabel('Validation Error')
         plt.legend()
         plt.savefig(f'{self.path}/final_pf')
         plt.clf()
@@ -751,12 +840,12 @@ def nsganet(
         pop_size=100,
         sampling=Sampling(),
         selection=TournamentSelection(func_comp=binary_tournament),
-        crossover=PointCrossover(n_points=2),
+        crossover=PointCrossover(type_crossover='UX'),
         mutation=Mutation(prob=0.05),
-        n_offsprings=None,
         local_search_on_pf=False,
         local_search_on_knee=False,
-        opt_val_acc_and_training_time=True,
+        followed_bosman_version=False,
+        n_points=1,
         **kwargs):
     """
 
@@ -773,16 +862,15 @@ def nsganet(
     -------
     nsganet : :class:`~pymoo.model.algorithm.Algorithm`
         Returns an NSGANet algorithm object.
+        :param n_points:
+        :param followed_bosman_version:
         :param sampling:
         :param selection:
         :param crossover:
         :param mutation:
-        :param n_offsprings:
         :param local_search_on_knee:
-        :param opt_val_acc_and_training_time:
-        :type pop_size: object
         :param local_search_on_pf:
-
+        :type pop_size: object
 
     """
 
@@ -792,10 +880,10 @@ def nsganet(
                    crossover=crossover,
                    mutation=mutation,
                    survival=RankAndCrowdingSurvival(),
-                   n_offsprings=n_offsprings,
                    local_search_on_pf=local_search_on_pf,
                    local_search_on_knee=local_search_on_knee,
-                   opt_val_acc_and_training_time=opt_val_acc_and_training_time,
+                   followed_bosman_version=followed_bosman_version,
+                   n_points=n_points,
                    **kwargs)
 
 

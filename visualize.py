@@ -302,6 +302,8 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
                      axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
 
     plt.grid()
+    plt.xscale('log')
+    plt.yscale('log')
     title = paths[-1].split('_')[0]
     plt.title(title)
     if save_fig:
@@ -353,7 +355,8 @@ def cal_hyper_volume(pareto_front, min_f0, max_f0, min_f1, max_f1):
 
     hyper_volume = pg.hypervolume(pareto_front.tolist())
     hyper_volume = hyper_volume.compute(rf)
-    return 1 - hyper_volume / np.prod(tmp)
+    return hyper_volume
+    # return 1 - hyper_volume / np.prod(tmp)
 
 
 def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
@@ -433,14 +436,15 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1)
 
     fig, ax = plt.subplots(1)
-    axis_lbs = ['No.Evaluations', '1 - Hypervolume']
+    axis_lbs = ['No.Evaluations', 'Hypervolume']
     colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:5]
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
-
+    plt.xscale('log')
+    plt.yscale('log')
     plt.grid()
     title = paths[-1].split('_')[0]
     plt.title(title)
@@ -456,13 +460,27 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
+    # Colors: red, blue, green, orange, black, purple
     path_1 = 'cifar10_100_False_True_True_25_10_03_13'
     path_2 = 'cifar10_100_True_False_True_25_10_03_19'
     path_3 = 'cifar10_100_True_False_False_25_10_03_24'
     path_4 = 'cifar10_100_False_True_False_25_10_03_27'
     path_5 = 'cifar10_100_False_False_False_25_10_03_33'
 
+    path_1 = 'cifar10_100_False_True_False_26_10_14_15'
+    path_2 = 'cifar10_100_False_False_False_26_10_14_03'
+    path_3 = 'cifar10_100_False_True_False_26_10_15_28_1point'
+    path_4 = 'cifar10_100_True_False_False_26_10_15_34'  # 2points
+    path_5 = 'cifar10_100_True_False_False_26_10_15_37'  # 1points
+
     paths = [path_1, path_2, path_3, path_4, path_5]
+
+    # path_1 = 'nas101_100_False_False_False_25_10_14_28'
+    # path_2 = 'nas101_100_True_False_False_25_10_15_37'
+    # path_3 = 'nas101_100_False_True_False_25_10_15_50'
+    # path_4 = 'nas101_100_True_False_True_25_10_16_36'
+    # path_5 = 'nas101_100_False_True_True_25_10_16_37'
+    # paths = [path_1, path_2, path_3, path_4, path_5]
 
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=False, save_fig=True)
 

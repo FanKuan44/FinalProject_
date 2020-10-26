@@ -8,10 +8,10 @@ class MyPointCrossover:
     This class must be inherited from to provide a crossover method to an algorithm.
     """
 
-    def __init__(self, n_points, n_parents=2, n_offsprings=2):
+    def __init__(self, type_crossover='1X', n_parents=2, n_offsprings=2):
         self.n_parents = n_parents
         self.n_offsprings = n_offsprings
-        self.n_points = n_points
+        self.type_crossover = type_crossover
 
     def do(self, problem, pop, **kwargs):
         """
@@ -44,18 +44,18 @@ class MyPointCrossover:
     def _do(self, problem, pop, **kwargs):
         benchmark_api = kwargs['algorithm'].benchmark_api
 
-        pop_X = pop.get('X')
-        pop_hashX = pop.get('hashX')
+        pop_X, pop_hashX = pop.get('X'), pop.get('hashX')
 
-        offspring_X = []
-        offspring_hashX = []
+        offspring_X, offspring_hashX = [], []
 
+        # Su dung trong truong hop crossover qua nhieu nhung khong tao ra ca the moi
         number_of_crossover = 0
         flag = False
 
         while len(offspring_X) < len(pop_X):
             if number_of_crossover > 100:
                 flag = True
+
             idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
             pop_X_ = pop.get('X')[idx]
 
@@ -65,18 +65,14 @@ class MyPointCrossover:
                     parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
                     parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
 
-                    points_crossover = np.random.randint(0, 8, (1, self.n_points))
-                    while True:
-                        if points_crossover[0][0] - points_crossover[0][1] == 0:
-                            points_crossover = np.random.randint(0, 9, (1, self.n_points))
-                        else:
-                            break
-                    low = points_crossover[0][0]
-                    if low > points_crossover[0][1]:
+                    points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
+
+                    low = points_crossover[0]
+                    if low > points_crossover[1]:
                         high = low
-                        low = points_crossover[0][1]
+                        low = points_crossover[1]
                     else:
-                        high = points_crossover[0][1]
+                        high = points_crossover[1]
 
                     parent1_matrix[low:high], parent2_matrix[low:high] = \
                         parent2_matrix[low:high], parent1_matrix[low: high].copy()
@@ -88,25 +84,36 @@ class MyPointCrossover:
                         spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
                         if benchmark_api.is_valid(spec):
                             module_hash_spec = benchmark_api.get_module_hash(spec)
+                            X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
+
                             if not flag:
-                                X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
-                                if (module_hash_spec not in offspring_hashX) and (
-                                        module_hash_spec not in pop_hashX):
+                                if (module_hash_spec not in offspring_hashX) and \
+                                        (module_hash_spec not in pop_hashX):
                                     offspring_X.append(X)
                                     offspring_hashX.append(module_hash_spec)
-                                else:
-                                    offspring_X.append(X)
-                                    offspring_hashX.append(module_hash_spec)
+                            else:
+                                offspring_X.append(X)
+                                offspring_hashX.append(module_hash_spec)
 
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
-                # 1 point crossover
                 for i in range(len(pop_X_)):
-                    offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
+                    offspring1_X, offspring2_X = None, None
 
-                    crossover_pt = np.random.randint(1, len(offspring1_X))
+                    if self.type_crossover == '1X':
+                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
 
-                    offspring1_X[crossover_pt:], offspring2_X[crossover_pt:] = \
-                        offspring2_X[crossover_pt:], offspring1_X[crossover_pt:].copy()
+                        crossover_pt = np.random.randint(1, len(offspring1_X))
+
+                        offspring1_X[crossover_pt:], offspring2_X[crossover_pt:] = \
+                            offspring2_X[crossover_pt:], offspring1_X[crossover_pt:].copy()
+
+                    elif self.type_crossover == 'UX':
+                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
+
+                        crossover_pts = np.random.randint(0, 2, offspring1_X.shape, dtype=np.bool)
+
+                        offspring1_X[crossover_pts], offspring2_X[crossover_pts] = \
+                            offspring2_X[crossover_pts], offspring1_X[crossover_pts].copy()
 
                     offspring1_hashX = ''.join(offspring1_X.tolist())
                     offspring2_hashX = ''.join(offspring2_X.tolist())
@@ -125,11 +132,14 @@ class MyPointCrossover:
 
                         offspring_X.append(offspring2_X)
                         offspring_hashX.append(offspring2_hashX)
+
             number_of_crossover += 1
         offspring_X = np.array(offspring_X)[:len(pop_X)]
         offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
+
         if flag:
             print('Exist Duplicate')
+
         ''' USING FOR CHECKING DUPLICATE '''
         # if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
         #     print('DUPLICATE')
@@ -140,6 +150,7 @@ class MyPointCrossover:
         #         break
         # -----------------------------------
         offspring = pop.new(len(pop_X))
+
         offspring.set('X', offspring_X)
         offspring.set('hashX', offspring_hashX)
         return offspring

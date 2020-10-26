@@ -24,9 +24,6 @@ parser.add_argument('--benchmark_name', type=str, default='nas101',
                     help='the benchmark is used for optimizing')
 parser.add_argument('--n_eval', type=int, default=10000, help='number of max evaluated')
 
-parser.add_argument('--opt_val_acc_and_training_time', type=int, default=1,
-                    help='optimize validation accuracy and training time')
-
 # hyper-parameters for main
 parser.add_argument('--seed', type=int, default=0, help='random seed')
 parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
@@ -36,8 +33,9 @@ parser.add_argument('--save', type=int, default=0, help='save to log file')
 parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
 parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
 parser.add_argument('--local_search_on_knee', type=int, default=0, help='local search on knee solutions')
-parser.add_argument('--bosman_version', type=int, default=0,
-                    help='local search on bosman version')
+parser.add_argument('--n_points', type=int, default=1, help='local search on n-points')
+parser.add_argument('--followed_bosman_paper', type=int, default=0,
+                    help='local search followed by bosman paper')
 
 args = parser.parse_args()
 
@@ -100,21 +98,6 @@ class NAS(MyProblem):
 # ---------------------------------------------------------------------------------------------------------
 
 
-def cal_euclid_distance(x1, x2):
-    e_dis = np.sqrt(np.sum((x1 - x2) ** 2))
-    return e_dis
-
-
-def cal_dpf(pareto_front, pareto_s):
-    d = 0
-    for solution in pareto_front:
-        d_ = np.inf
-        for solution_ in pareto_s:
-            d_ = min(cal_euclid_distance(solution, solution_), d_)
-        d += d_
-    return d / len(pareto_front)
-
-
 def do_every_generations(algorithm):
     gen = algorithm.n_gen
     print('Gen:', gen)
@@ -134,31 +117,34 @@ def do_every_generations(algorithm):
         pickle.dump([pf, algorithm.problem._n_evaluated],
                     open(f'{algorithm.path}/pf_eval/pf_and_evaluated_gen_{gen}.p', 'wb'))
 
-    # ''' Plot pareto front / elitist archive '''
-    # plt.scatter(pf[:, 1], pf[:, 0], c='blue', s=15, label='Elitist Archive')
-    # plt.scatter(algorithm.pf_true[:, 1], algorithm.pf_true[:, 0], s=30, edgecolors='red', facecolors='none',
-    #             label='True PF')
-    # plt.title(f'Gen {gen}')
-    # plt.legend()
-    # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
-    # plt.clf()
+        ''' Plot pareto front / elitist archive '''
+        # plt.scatter(algorithm.pf_true[:, 0], algorithm.pf_true[:, 1], facecolors='none', edgecolors='red', s=40,
+        #             label='True PF')
+        # plt.scatter(pf[:, 0], pf[:, 1], c='blue', s=20, label='Elitist Archive')
+        # plt.legend()
+        # plt.savefig(f'{algorithm.path}/visualize_pf_each_gen/{gen}')
+        # plt.clf()
 
 
 if __name__ == '__main__':
-    print('*** Parameters of NSGANet ***')
+    print('*** Details of Experiment ***')
+    print('- Algorithm: NSGAII')
+    print('- Benchmark:', args.benchmark_name)
     print('- Population Size:', args.pop_size)
-    print('- Max of no.evaluations:', args.n_eval)
+    print('- Max of No.evaluations:', args.n_eval)
     print('- Local Search on PF:', bool(args.local_search_on_pf))
     print('- Local Search on Knee Solutions:', bool(args.local_search_on_knee))
-    print('- Local Search followed by Bosman ver:', bool(args.bosman_version))
+    if bool(args.local_search_on_pf) or bool(args.local_search_on_pf):
+        print('- Local Search on n-points:', args.n_points)
+    print('- Local Search followed by Bosman ver:', bool(args.followed_bosman_paper))
     print('*' * 40)
     print()
 
-    # Syntax: 'benchmark_name'_'pop_size'_'local_search_on_pf'_'local_search_on_knee'_'bosman_version'
+    # Syntax: 'benchmark_name'_'pop_size'_'local_search_on_pf'_'local_search_on_knee'_'followed_bosman_paper'_'n_points'
     now = datetime.now()
     dir_name = now.strftime(f'{args.benchmark_name}_{args.pop_size}_'
                             f'{bool(args.local_search_on_pf)}_{bool(args.local_search_on_knee)}_'
-                            f'{bool(args.bosman_version)}_%d_%m_%H_%M')
+                            f'{bool(args.followed_bosman_paper)}_{args.n_points}point_%d_%m_%H_%M')
     path = dir_name
 
     if args.save == 1:
@@ -216,12 +202,9 @@ if __name__ == '__main__':
                           '---------------------------------------\n\n')
             logfile.write(f'# Benchmark Dataset: {args.benchmark_name}\n')
             if args.benchmark_name == 'nas101':
-                if args.opt_val_acc_and_training_time == 1:
-                    logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; Training Time (normalize)]\n\n')
-                else:
-                    logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; Model Parameters (normalize)]\n\n')
+                logfile.write(f'# Objectives Optimize: [Model Params (normalize); 1 - Validation Accuracy]\n\n')
             elif args.benchmark_name == 'cifar10' or args.benchmark_name == 'cifar100':
-                logfile.write(f'# Objectives Optimize: [1 - Validation Accuracy; MMACs (normalize)]\n\n')
+                logfile.write(f'# Objectives Optimize: [MMACs (normalize); 1 - Validation Accuracy]\n\n')
             logfile.write('*' * 50)
             logfile.write('\n\n')
 
@@ -232,7 +215,9 @@ if __name__ == '__main__':
             logfile.write(f'# Number of Max Evaluate: {args.n_eval}\n')
             logfile.write(f'# Local Search on PF: {bool(args.local_search_on_pf)}\n')
             logfile.write(f'# Local Search on Knee Solutions: {bool(args.local_search_on_knee)}\n')
-            logfile.write(f'# Local Search followed by Bosman ver: {bool(args.bosman_version)}\n\n')
+            if bool(args.local_search_on_pf) or bool(args.local_search_on_pf):
+                logfile.write(f'# Local Search on n-points: {args.n_points}\n')
+            logfile.write(f'# Local Search followed by Bosman ver: {bool(args.followed_bosman_paper)}\n\n')
             logfile.write('*' * 50)
             logfile.write('\n\n')
         else:
@@ -241,11 +226,11 @@ if __name__ == '__main__':
 
         # configure the nsga-net method
         method = engine.nsganet(pop_size=args.pop_size,
-                                n_offsprings=args.pop_size,
                                 benchmark=args.benchmark_name,
                                 local_search_on_pf=args.local_search_on_pf,
                                 local_search_on_knee=args.local_search_on_knee,
-                                bosman_version=args.bosman_version,
+                                followed_bosman_paper=args.followed_bosman_paper,
+                                n_points=args.n_points,
                                 path=path_)
 
         res = minimize(problem,
@@ -253,5 +238,6 @@ if __name__ == '__main__':
                        callback=do_every_generations,
                        termination=('n_eval', args.n_eval))
         problem._n_evaluated = 0
+
     if args.save == 1:
         print('All files are saved on ' + path)

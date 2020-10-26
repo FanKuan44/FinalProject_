@@ -64,12 +64,6 @@ def cal_angle():
 
 if __name__ == '__main__':
     # cal_angle()
-    pf = pickle.load(open('101_benchmark/nas101.p', 'rb'))
-    print(pf)
-    min_max = pickle.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
-    print(min_max)
-    # pf[:, 1] = (pf[:, 1] - min_max['min_model_params']) / (min_max['max_model_params'] - min_max['min_model_params'])
-    # pf = np.unique(pf, axis=0)
-    # pickle.dump(pf, open('101_benchmark/pf_validation_parameters.p', 'wb'))
-    # plt.scatter(pf[:, 1], pf[:, 0])
-    # plt.show()
+    x = [[[1, 2], [3, 4]]]
+    print([[3, 4], [1, 2]] in x)
+
