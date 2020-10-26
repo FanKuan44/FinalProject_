@@ -24,7 +24,7 @@
 # data = nasbench.query(cell)
 
 
-"""Find the solutions whose rank equal 0"""
+""" Find the solutions whose rank equal 0 """
 # f_value = np.array(pickle.load(open('f_value.p', 'rb')))
 # f_value[:, 0] = 1 - f_value[:, 0]
 # print("LOAD DATA DONE!!")
@@ -71,38 +71,10 @@ def check_better(x1, x2):
         return 'obj2'
     if x2[1] <= x1[1] and x2[0] < x1[0]:
         return 'obj2'
-    """-----------------------------------"""
-    # if x1[0] >= x2[0] and x1[1] > x2[1]:
-    #     return 'obj1'
-    # if x1[1] >= x2[1] and x1[0] > x2[0]:
-    #     return 'obj1'
-    # if x2[0] >= x1[0] and x2[1] > x1[1]:
-    #     return 'obj2'
-    # if x2[1] >= x1[1] and x2[0] > x1[0]:
-    #     return 'obj2'
-    """-----------------------------------"""
-    # if x1[0] <= x2[0] and x1[1] > x2[1]:
-    #     return 'obj1'
-    # if x1[1] >= x2[1] and x1[0] < x2[0]:
-    #     return 'obj1'
-    # if x2[0] <= x1[0] and x2[1] > x1[1]:
-    #     return 'obj2'
-    # if x2[1] >= x1[1] and x2[0] < x1[0]:
-    #     return 'obj2'
-    """-----------------------------------"""
-    # if x1[0] >= x2[0] and x1[1] < x2[1]:
-    #     return 'obj1'
-    # if x1[1] <= x2[1] and x1[0] > x2[0]:
-    #     return 'obj1'
-    # if x2[0] >= x1[0] and x2[1] < x1[1]:
-    #     return 'obj2'
-    # if x2[1] <= x1[1] and x2[0] > x1[0]:
-    #     return 'obj2'
-    # return 'none'
 
 
-def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), color='blue', legend=False):
-    place_to_plot.plot(objective_0, objective_1, c=color, label=label)
+def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), legend=False):
+    place_to_plot.plot(objective_0, objective_1, label=label)
     place_to_plot.set_xlabel(axis_labels[0])
     place_to_plot.set_ylabel(axis_labels[1])
     if legend:
@@ -293,13 +265,13 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'DPFS']
-    colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
+    # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:5]
+        label = paths[i].split('_')[1:6]
 
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
-                     axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
+                     axis_labels=axis_lbs, label=label, legend=True)
 
     plt.grid()
     plt.xscale('log')
@@ -309,9 +281,9 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
+        plt.clf()
     if show_fig:
         plt.show()
-    plt.clf()
 
 
 '''------------ Visualize "Hyper-Volume of Pareto Front Approximate" and "Number of Evaluations" ------------'''
@@ -437,12 +409,12 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'Hypervolume']
-    colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
+    # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:5]
+        label = paths[i].split('_')[1:6]
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
-                     axis_labels=axis_lbs, color=colors[i], label=label, legend=True)
+                     axis_labels=axis_lbs, label=label, legend=True)
     plt.xscale('log')
     plt.yscale('log')
     plt.grid()
@@ -451,43 +423,33 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'hp_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
+        plt.clf()
     if show_fig:
         plt.show()
-    plt.clf()
 
 
 ''' ------------------------------------ Main ------------------------------------ '''
 
 
 def main():
-    # Colors: red, blue, green, orange, black, purple
-    path_1 = 'cifar10_100_False_True_True_25_10_03_13'
-    path_2 = 'cifar10_100_True_False_True_25_10_03_19'
-    path_3 = 'cifar10_100_True_False_False_25_10_03_24'
-    path_4 = 'cifar10_100_False_True_False_25_10_03_27'
-    path_5 = 'cifar10_100_False_False_False_25_10_03_33'
+    path_1 = 'cifar100_100_False_False_False_0point_26_10_17_00'
+    path_2 = 'cifar100_100_True_False_False_1point_26_10_17_05'
+    path_3 = 'cifar100_100_True_False_False_2point_26_10_17_08'
+    path_4 = 'cifar100_100_False_True_False_1point_26_10_17_11'
+    path_5 = 'cifar100_100_False_True_False_2point_26_10_17_15'
+    path_6 = 'cifar100_100_True_False_True_1point_26_10_17_24'
+    path_7 = 'cifar100_100_True_False_True_2point_26_10_17_30'
+    path_8 = 'cifar100_100_False_True_True_1point_26_10_17_40'
+    path_9 = 'cifar100_100_False_True_True_2point_26_10_17_48'
 
-    path_1 = 'cifar10_100_False_True_False_26_10_14_15'
-    path_2 = 'cifar10_100_False_False_False_26_10_14_03'
-    path_3 = 'cifar10_100_False_True_False_26_10_15_28_1point'
-    path_4 = 'cifar10_100_True_False_False_26_10_15_34'  # 2points
-    path_5 = 'cifar10_100_True_False_False_26_10_15_37'  # 1points
+    paths = [path_1, path_2, path_3, path_4, path_5, path_6, path_7, path_8, path_9]
 
-    paths = [path_1, path_2, path_3, path_4, path_5]
-
-    # path_1 = 'nas101_100_False_False_False_25_10_14_28'
-    # path_2 = 'nas101_100_True_False_False_25_10_15_37'
-    # path_3 = 'nas101_100_False_True_False_25_10_15_50'
-    # path_4 = 'nas101_100_True_False_True_25_10_16_36'
-    # path_5 = 'nas101_100_False_True_True_25_10_16_37'
-    # paths = [path_1, path_2, path_3, path_4, path_5]
-
-    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=False, save_fig=True)
+    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=False, save_fig=True)
+    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
 
 
 if __name__ == '__main__':

@@ -134,7 +134,7 @@ if __name__ == '__main__':
     print('- Max of No.evaluations:', args.n_eval)
     print('- Local Search on PF:', bool(args.local_search_on_pf))
     print('- Local Search on Knee Solutions:', bool(args.local_search_on_knee))
-    if bool(args.local_search_on_pf) or bool(args.local_search_on_pf):
+    if bool(args.local_search_on_pf) or bool(args.local_search_on_knee):
         print('- Local Search on n-points:', args.n_points)
     print('- Local Search followed by Bosman ver:', bool(args.followed_bosman_paper))
     print('*' * 40)
@@ -215,7 +215,7 @@ if __name__ == '__main__':
             logfile.write(f'# Number of Max Evaluate: {args.n_eval}\n')
             logfile.write(f'# Local Search on PF: {bool(args.local_search_on_pf)}\n')
             logfile.write(f'# Local Search on Knee Solutions: {bool(args.local_search_on_knee)}\n')
-            if bool(args.local_search_on_pf) or bool(args.local_search_on_pf):
+            if bool(args.local_search_on_pf) or bool(args.local_search_on_knee):
                 logfile.write(f'# Local Search on n-points: {args.n_points}\n')
             logfile.write(f'# Local Search followed by Bosman ver: {bool(args.followed_bosman_paper)}\n\n')
             logfile.write('*' * 50)
