@@ -178,13 +178,13 @@ if __name__ == '__main__':
             # Open file log
             logfile = open(path_ + '/log_fife.txt', 'w')
 
-            # Create sub-sub-folder (pf_eval)
+            # Create folder (pf_eval)
             try:
                 os.mkdir(path_ + '/pf_eval')
             except FileExistsError:
                 pass
 
-            # Create sub-sub-folder (visualize_pf_each_gen)
+            # Create folder (visualize_pf_each_gen)
             try:
                 os.mkdir(path_ + '/visualize_pf_each_gen')
             except FileExistsError:
