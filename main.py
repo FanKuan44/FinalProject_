@@ -1,18 +1,16 @@
-import sys
+import argparse
 import os
 import pickle
-import matplotlib.pyplot as plt
+import sys
 from datetime import datetime
-import argparse
 
 import numpy as np
-from search import nsganet as engine
-
-from wrap_pymoo.problem import MyProblem
-from pymoo.util.non_dominated_sorting import NonDominatedSorting
 from pymoo.optimize import minimize
 
 from nasbench import wrap_api as api
+from search import moeadnet as engine_moead
+from search import nsganet as engine_nsga
+from wrap_pymoo.problem import MyProblem
 
 # update your projecty root path before running
 sys.path.insert(0, '/path/to/nsga-net')
@@ -21,7 +19,7 @@ parser = argparse.ArgumentParser("Multi-Objective Genetic Algorithm for NAS")
 
 # hyper-parameters for problem
 parser.add_argument('--benchmark_name', type=str, default='nas101',
-                    help='the benchmark is used for optimizing')
+                    help='the benchmark used for optimizing')
 parser.add_argument('--n_eval', type=int, default=10000, help='number of max evaluated')
 
 # hyper-parameters for main
@@ -29,13 +27,18 @@ parser.add_argument('--seed', type=int, default=0, help='random seed')
 parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
 parser.add_argument('--save', type=int, default=0, help='save to log file')
 
-# hyper-parameters for algorithm
+# hyper-parameters for algorithm (general)
+parser.add_argument('--algorithm', type=str, default='nsganet', help='the algorithm for solving')
 parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
 parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
 parser.add_argument('--local_search_on_knee', type=int, default=0, help='local search on knee solutions')
 parser.add_argument('--n_points', type=int, default=1, help='local search on n-points')
 parser.add_argument('--followed_bosman_paper', type=int, default=0,
                     help='local search followed by bosman paper')
+
+# hyper-parameters for algorithm (MOEA/D Net)
+parser.add_argument('--n_neighbors', type=int, default=10)
+parser.add_argument('--prob_neighbor_mating', type=float, default=1.0)
 
 args = parser.parse_args()
 
@@ -44,7 +47,6 @@ args = parser.parse_args()
 # Define your NAS Problem
 # ---------------------------------------------------------------------------------------------------------
 class NAS(MyProblem):
-    # first define the NAS problem (inherit from pymop)
     def __init__(self, n_obj=2, problem_name='nas101', save_dir=None):
         super().__init__(n_obj=n_obj)
 
@@ -69,7 +71,7 @@ class NAS(MyProblem):
         if self.problem_name == 'nas101':
             benchmark_api = kwargs['algorithm'].benchmark_api
             for i in range(x.shape[0]):
-                cell = api.ModelSpec(matrix=np.array(x[i][:-1, :], dtype=np.int), ops=x[i][-1, :].tolist())
+                cell = api.ModelSpec(matrix=np.array(x[i][:-1], dtype=np.int), ops=x[i][-1].tolist())
                 module_hash = benchmark_api.get_module_hash(cell)
 
                 F[i, 0] = (self.benchmark_data[module_hash]['params'] - self.min_max['min_model_params']) / (
@@ -128,15 +130,19 @@ def do_every_generations(algorithm):
 
 if __name__ == '__main__':
     print('*** Details of Experiment ***')
-    print('- Algorithm: NSGAII')
+    print('- Algorithm:', args.algorithm)
     print('- Benchmark:', args.benchmark_name)
-    print('- Population Size:', args.pop_size)
-    print('- Max of No.evaluations:', args.n_eval)
-    print('- Local Search on PF:', bool(args.local_search_on_pf))
-    print('- Local Search on Knee Solutions:', bool(args.local_search_on_knee))
-    if bool(args.local_search_on_pf) or bool(args.local_search_on_knee):
-        print('- Local Search on n-points:', args.n_points)
-    print('- Local Search followed by Bosman ver:', bool(args.followed_bosman_paper))
+    print('- Population size:', args.pop_size)
+    print('- Max of no.evaluations:', args.n_eval)
+    if args.algorithm == 'nsganet':
+        print('- Local search on PF:', bool(args.local_search_on_pf))
+        print('- Local search on Knee Solutions:', bool(args.local_search_on_knee))
+        if bool(args.local_search_on_pf) or bool(args.local_search_on_knee):
+            print('- Local Search on n-points:', args.n_points)
+        print('- Local Search followed by Bosman ver:', bool(args.followed_bosman_paper))
+    else:
+        print('- Number of neighbors:', args.n_neighbors)
+        print('- Probability of neighbor mating:', args.prob_neighbor_mating)
     print('*' * 40)
     print()
 
@@ -225,13 +231,21 @@ if __name__ == '__main__':
         # ==============================================================================================================
 
         # configure the nsga-net method
-        method = engine.nsganet(pop_size=args.pop_size,
-                                benchmark=args.benchmark_name,
-                                local_search_on_pf=args.local_search_on_pf,
-                                local_search_on_knee=args.local_search_on_knee,
-                                followed_bosman_paper=args.followed_bosman_paper,
-                                n_points=args.n_points,
-                                path=path_)
+        if args.algorithm == 'nsganet':
+            method = engine_nsga.nsganet(pop_size=args.pop_size,
+                                         benchmark=args.benchmark_name,
+                                         local_search_on_pf=args.local_search_on_pf,
+                                         local_search_on_knee=args.local_search_on_knee,
+                                         followed_bosman_paper=args.followed_bosman_paper,
+                                         n_points=args.n_points,
+                                         path=path_)
+        else:
+            method = engine_moead.moeadnet(benchmark=args.benchmark_name,
+                                           path=path_,
+                                           pop_size=args.pop_size,
+                                           n_neighbors=args.n_neighbors,
+                                           prob_neighbor_mating=args.prob_neighbor_mating,
+                                           )
 
         res = minimize(problem,
                        method,

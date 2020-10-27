@@ -44,15 +44,14 @@
 #         pareto_front.append(f_value[i])
 #         print(f_value[i])
 
-
-# from deap.tools._hypervolume.pyhv import _HyperVolume
 import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
-from datetime import datetime
-import pickle
-import pygmo as pg
-import os
 import numpy as np
+import os
+import pickle
+
+from datetime import datetime
+from pymoo.indicators.hv import _HyperVolume
+from scipy.interpolate import interp1d
 
 now = datetime.now()
 dir_name = now.strftime("%d_%m_%Y_%H_%M_%S")
@@ -320,18 +319,17 @@ def find_max_f0_f1_min_f0_f1(paths):
     return min_f0, max_f0, min_f1, max_f1
 
 
-def cal_hyper_volume(pareto_front, min_f0, max_f0, min_f1, max_f1):
-    rf = [max_f0 + 1e-5, max_f1 + 1e-5]
-    tmp = [rf[0] - min_f0, rf[1] - min_f1]
-    # tmp = [rf[0], rf[1]]
+def cal_hyper_volume(hp, pareto_front):
+    # rf = [max_f0 + 1e-5, max_f1 + 1e-5]
+    # tmp = [rf[0] - min_f0, rf[1] - min_f1]
+    # hp = _HyperVolume(rf)
 
-    hyper_volume = pg.hypervolume(pareto_front.tolist())
-    hyper_volume = hyper_volume.compute(rf)
+    hyper_volume = hp.compute(pareto_front)
     return hyper_volume
     # return 1 - hyper_volume / np.prod(tmp)
 
 
-def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
+def get_avg_hp_and_evaluate(paths, hp_calculate):
     hp_avg_each_path = []
     no_eval_avg_each_path = []
 
@@ -377,7 +375,7 @@ def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
             for file_i in range(number_of_files):
                 pf_approximate, no_eval = pickle.load(open(path_ + '/' + pf_and_eval_folder[file_i], 'rb'))
 
-                hp = cal_hyper_volume(pf_approximate, min_f0, max_f0, min_f1, max_f1)
+                hp = cal_hyper_volume(hp=hp_calculate, pareto_front=pf_approximate)
 
                 hp_each_gen.append(hp)
                 no_eval_each_gen.append(no_eval)
@@ -405,7 +403,11 @@ def get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1):
 
 def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False):
     min_f0, max_f0, min_f1, max_f1 = find_max_f0_f1_min_f0_f1(paths)
-    hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, min_f0, max_f0, min_f1, max_f1)
+
+    rf = [max_f0 + 1e-5, max_f1 + 1e-5]
+    hp_calculate = _HyperVolume(rf)
+
+    hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, hp_calculate)
 
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'Hypervolume']
@@ -432,20 +434,20 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
-    path_1 = 'cifar100_100_False_False_False_0point_26_10_17_00'
-    path_2 = 'cifar100_100_True_False_False_1point_26_10_17_05'
-    path_3 = 'cifar100_100_True_False_False_2point_26_10_17_08'
-    path_4 = 'cifar100_100_False_True_False_1point_26_10_17_11'
-    path_5 = 'cifar100_100_False_True_False_2point_26_10_17_15'
-    path_6 = 'cifar100_100_True_False_True_1point_26_10_17_24'
-    path_7 = 'cifar100_100_True_False_True_2point_26_10_17_30'
-    path_8 = 'cifar100_100_False_True_True_1point_26_10_17_40'
-    path_9 = 'cifar100_100_False_True_True_2point_26_10_17_48'
+    path_1 = 'nas101_100_False_False_False_0point_26_10_18_18'
+    path_2 = 'nas101_100_True_False_False_1point_26_10_18_36'
+    path_3 = 'nas101_100_True_False_False_2point_26_10_21_19'
+    path_4 = 'nas101_100_False_True_False_1point_26_10_22_39'
+    path_5 = 'nas101_100_False_True_False_2point_26_10_22_57'
+    path_6 = 'nas101_100_True_False_True_1point_27_10_02_55'
+    path_7 = 'nas101_100_True_False_True_2point_27_10_03_13'
+    path_8 = 'nas101_100_False_True_True_1point_27_10_12_36'
+    path_9 = 'nas101_100_False_True_True_2point_27_10_12_48'
 
     paths = [path_1, path_2, path_3, path_4, path_5, path_6, path_7, path_8, path_9]
-
+    # paths = [path_1, path_4]
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
-
+    #
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 

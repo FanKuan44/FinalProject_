@@ -48,7 +48,7 @@ class MySampling(Sampling):
                     hashX = ''.join(X.tolist())
                     if hashX not in pop_hashX:
                         F = kwargs['algorithm'].evaluator.eval(
-                            problem, np.array([hashX]), check=True, algorithm=kwargs['algorithm'])
+                            problem, X, check=True, algorithm=kwargs['algorithm'])
                         pop_F.append(F)
                         pop_X.append(X)
                         pop_hashX.append(hashX)

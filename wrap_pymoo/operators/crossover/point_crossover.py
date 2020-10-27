@@ -60,40 +60,73 @@ class MyPointCrossover:
             pop_X_ = pop.get('X')[idx]
 
             if problem.problem_name == 'nas101':
-                # 2 points crossover
                 for i in range(len(pop_X_)):
-                    parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
-                    parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
+                    if self.type_crossover == 'UX':
+                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
 
-                    points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
+                        crossover_pts = np.random.randint(0, 2, offspring1_X[-1].shape, dtype=np.bool)
 
-                    low = points_crossover[0]
-                    if low > points_crossover[1]:
-                        high = low
-                        low = points_crossover[1]
+                        offspring1_X[-1][crossover_pts], offspring2_X[-1][crossover_pts] = \
+                            offspring2_X[-1][crossover_pts], offspring1_X[-1][crossover_pts].copy()
+
+                        module_spec1 = api.ModelSpec(matrix=np.array(offspring1_X[:-1], dtype=np.int),
+                                                     ops=offspring1_X[-1].tolist())
+                        module_spec2 = api.ModelSpec(matrix=np.array(offspring2_X[:-1], dtype=np.int),
+                                                     ops=offspring2_X[-1].tolist())
+
+                        offspring1_hashX = benchmark_api.get_module_hash(module_spec1)
+                        offspring2_hashX = benchmark_api.get_module_hash(module_spec2)
+
+                        offsprings_X = [offspring1_X, offspring2_X]
+                        checked_specs = [module_spec1, module_spec2]
+                        checked_hashX = [offspring1_hashX, offspring2_hashX]
+
+                        for j in range(2):
+                            if benchmark_api.is_valid(checked_specs[j]):
+                                if not flag:
+                                    if (checked_hashX[j] not in offspring_hashX) and \
+                                            (checked_hashX[j] not in pop_hashX):
+                                        offspring_X.append(offsprings_X[j])
+                                        offspring_hashX.append(checked_hashX[j])
+                                else:
+                                    offspring_X.append(offsprings_X[j])
+                                    offspring_hashX.append(checked_hashX[j])
+                            else:
+                                print('invalid-crossover')
                     else:
-                        high = points_crossover[1]
+                        # 2 points crossover
+                        parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
+                        parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
 
-                    parent1_matrix[low:high], parent2_matrix[low:high] = \
-                        parent2_matrix[low:high], parent1_matrix[low: high].copy()
-                    parent1_ops[low:high], parent2_ops[low:high] = \
-                        parent2_ops[low:high], parent1_ops[low:high].copy()
+                        points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
 
-                    idv_check = [[parent1_matrix, parent1_ops], [parent2_matrix, parent2_ops]]
-                    for idv in idv_check:
-                        spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
-                        if benchmark_api.is_valid(spec):
-                            module_hash_spec = benchmark_api.get_module_hash(spec)
-                            X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
+                        low = points_crossover[0]
+                        if low > points_crossover[1]:
+                            high = low
+                            low = points_crossover[1]
+                        else:
+                            high = points_crossover[1]
 
-                            if not flag:
-                                if (module_hash_spec not in offspring_hashX) and \
-                                        (module_hash_spec not in pop_hashX):
+                        parent1_matrix[low:high], parent2_matrix[low:high] = \
+                            parent2_matrix[low:high], parent1_matrix[low: high].copy()
+                        parent1_ops[low:high], parent2_ops[low:high] = \
+                            parent2_ops[low:high], parent1_ops[low:high].copy()
+
+                        idv_check = [[parent1_matrix, parent1_ops], [parent2_matrix, parent2_ops]]
+                        for idv in idv_check:
+                            spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
+                            if benchmark_api.is_valid(spec):
+                                module_hash_spec = benchmark_api.get_module_hash(spec)
+                                X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
+
+                                if not flag:
+                                    if (module_hash_spec not in offspring_hashX) and \
+                                            (module_hash_spec not in pop_hashX):
+                                        offspring_X.append(X)
+                                        offspring_hashX.append(module_hash_spec)
+                                else:
                                     offspring_X.append(X)
                                     offspring_hashX.append(module_hash_spec)
-                            else:
-                                offspring_X.append(X)
-                                offspring_hashX.append(module_hash_spec)
 
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
                 for i in range(len(pop_X_)):

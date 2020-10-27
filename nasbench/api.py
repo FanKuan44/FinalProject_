@@ -111,7 +111,6 @@ class OutOfDomainError(Exception):
 
 class NASBench(object):
   """User-facing API for accessing the NASBench dataset."""
-
   def __init__(self, dataset_file, seed=None):
     """Initialize dataset, this should only be done once per experiment.
 
@@ -363,23 +362,28 @@ class NASBench(object):
   def _check_spec(self, model_spec):
     """Checks that the model spec is within the dataset."""
     if not model_spec.valid_spec:
+      # print('invalid spec')
       raise OutOfDomainError('invalid spec, provided graph is disconnected.')
 
     num_vertices = len(model_spec.ops)
     num_edges = np.sum(model_spec.matrix)
 
     if num_vertices > self.config['module_vertices']:
+      # print('vertices')
       raise OutOfDomainError('too many vertices, got %d (max vertices = %d)'
                              % (num_vertices, config['module_vertices']))
 
     if num_edges > self.config['max_edges']:
+      # print('edges')
       raise OutOfDomainError('too many edges, got %d (max edges = %d)'
                              % (num_edges, self.config['max_edges']))
 
     if model_spec.ops[0] != 'input':
       raise OutOfDomainError('first operation should be \'input\'')
+
     if model_spec.ops[-1] != 'output':
       raise OutOfDomainError('last operation should be \'output\'')
+
     for op in model_spec.ops[1:-1]:
       if op not in self.config['available_ops']:
         raise OutOfDomainError('unsupported op %s (available ops = %s)'

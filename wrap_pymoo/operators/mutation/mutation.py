@@ -1,13 +1,10 @@
 import numpy as np
 import copy
 
-from pymoo.rand import random
 from nasbench import api
 
-from abc import abstractmethod
 
-
-class Mutation:
+class MyMutation:
     def __init__(self, eta=3, prob=0.05):
         self.eta = float(eta)
         self.prob = prob
@@ -40,9 +37,36 @@ class Mutation:
 
         offspring_X = []
         offspring_hashX = []
+
         while len(offspring_X) < len(pop_X):
             if problem.problem_name == 'nas101':
                 benchmark_api = kwargs['algorithm'].benchmark_api
+
+                # mutation_pts = np.random.rand(pop_X.shape[0], 7)
+                #
+                # for i in range(len(pop_X)):
+                #     offspring_old_X = pop_X[i].copy()
+                #     for j in range(1, 6):
+                #         if mutation_pts[i][j] <= self.prob:
+                #             choices = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                #             choices.remove(offspring_old_X[-1][j])
+                #             offspring_old_X[-1][j] = np.random.choice(choices)
+                #
+                #     new_spec = api.ModelSpec(np.array(offspring_old_X[:-1], dtype=np.int), offspring_old_X[-1].tolist())
+                #
+                #     if benchmark_api.is_valid(new_spec):
+                #         module_hash_spec = benchmark_api.get_module_hash(new_spec)
+                #         if module_hash_spec in offspring_hashX:
+                #             print('duplicate offspring')
+                #         if module_hash_spec in pop_hashX:
+                #             print('duplicate pop')
+                #         if (module_hash_spec not in offspring_hashX) and \
+                #                 (module_hash_spec not in pop_hashX):
+                #             offspring_X.append(offspring_old_X)
+                #             offspring_hashX.append(module_hash_spec)
+                #     else:
+                #         print('invalid-mutation')
+
                 for x in pop_X:
                     new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
                     new_ops = copy.deepcopy(x[-1, :])
@@ -50,21 +74,21 @@ class Mutation:
                     edge_mutation_prob = 1 / 7
                     for src in range(0, 7 - 1):
                         for dst in range(src + 1, 7):
-                            if random.random() < edge_mutation_prob:
+                            if np.random.rand() < edge_mutation_prob:
                                 new_matrix[src, dst] = 1 - new_matrix[src, dst]
 
                     # In expectation, one op is resampled.
                     op_mutation_prob = 1 / 5
                     for ind in range(1, 7 - 1):
-                        if random.random() < op_mutation_prob:
+                        if np.random.rand() < op_mutation_prob:
                             available = [o for o in benchmark_api.config['available_ops'] if o != new_ops[ind]]
-                            new_ops[ind] = random.choice(available)
+                            new_ops[ind] = np.random.choice(available)
                     new_spec = api.ModelSpec(new_matrix, new_ops.tolist())
 
                     if benchmark_api.is_valid(new_spec):
                         module_hash_spec = benchmark_api.get_module_hash(new_spec)
-                        if (module_hash_spec not in offspring_hashX) and (
-                                module_hash_spec not in pop_hashX):
+                        if (module_hash_spec not in offspring_hashX) and \
+                                (module_hash_spec not in pop_hashX):
                             offspring_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
                             offspring_hashX.append(module_hash_spec)
 
@@ -104,5 +128,3 @@ class Mutation:
         offspring.set('X', offspring_X)
         offspring.set('hashX', offspring_hashX)
         return offspring
-
-
