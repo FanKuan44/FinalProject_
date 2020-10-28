@@ -204,6 +204,7 @@ class NSGANet(GeneticAlgorithm):
             update_elitist_archive(pop_X, pop_hashX, pop_F,
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
                                    first=True)
+        print(pop.get('X'))
         return pop
 
     # DONE
@@ -641,6 +642,7 @@ class NSGANet(GeneticAlgorithm):
 
         ''' INITIALIZE '''
         self.pop = self._initialize()
+        print('--> Initialize - Done')
 
         ''' CALCULATE DPFS EACH GEN - USING FOR VISUALIZE'''
         dpfs = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
@@ -828,7 +830,7 @@ def nsganet(
         pop_size=100,
         sampling=Sampling(),
         selection=TournamentSelection(func_comp=binary_tournament),
-        crossover=PointCrossover(type_crossover='2X'),
+        crossover=PointCrossover(type_crossover='UX'),
         mutation=Mutation(prob=0.05),
         local_search_on_pf=False,
         local_search_on_knee=False,

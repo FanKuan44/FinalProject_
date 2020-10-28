@@ -130,19 +130,15 @@ class MyPointCrossover:
 
             elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
                 for i in range(len(pop_X_)):
-                    offspring1_X, offspring2_X = None, None
+                    offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
 
                     if self.type_crossover == '1X':
-                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
-
                         crossover_pt = np.random.randint(1, len(offspring1_X))
 
                         offspring1_X[crossover_pt:], offspring2_X[crossover_pt:] = \
                             offspring2_X[crossover_pt:], offspring1_X[crossover_pt:].copy()
 
                     elif self.type_crossover == 'UX':
-                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
-
                         crossover_pts = np.random.randint(0, 2, offspring1_X.shape, dtype=np.bool)
 
                         offspring1_X[crossover_pts], offspring2_X[crossover_pts] = \
@@ -171,7 +167,7 @@ class MyPointCrossover:
         offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
 
         if flag:
-            print('Exist Duplicate')
+            print('exist duplicate - crossover')
 
         ''' USING FOR CHECKING DUPLICATE '''
         # if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:

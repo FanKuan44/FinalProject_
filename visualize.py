@@ -54,22 +54,22 @@ from pymoo.indicators.hv import _HyperVolume
 from scipy.interpolate import interp1d
 
 now = datetime.now()
-dir_name = now.strftime("%d_%m_%Y_%H_%M_%S")
+dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')
 try:
     os.mkdir('fig/' + dir_name)
 except FileExistsError:
     pass
 
 
-def check_better(x1, x2):
-    if x1[0] <= x2[0] and x1[1] < x2[1]:
-        return 'obj1'
-    if x1[1] <= x2[1] and x1[0] < x2[0]:
-        return 'obj1'
-    if x2[0] <= x1[0] and x2[1] < x1[1]:
-        return 'obj2'
-    if x2[1] <= x1[1] and x2[0] < x1[0]:
-        return 'obj2'
+# def check_better(x1, x2):
+#     if x1[0] <= x2[0] and x1[1] < x2[1]:
+#         return 'obj1'
+#     if x1[1] <= x2[1] and x1[0] < x2[0]:
+#         return 'obj1'
+#     if x2[0] <= x1[0] and x2[1] < x1[1]:
+#         return 'obj2'
+#     if x2[1] <= x1[1] and x2[0] < x1[0]:
+#         return 'obj2'
 
 
 def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), legend=False):
@@ -267,7 +267,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:6]
+        label = paths[i].split('_')[1:-4]
 
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label, legend=True)
@@ -275,7 +275,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     plt.grid()
     plt.xscale('log')
     plt.yscale('log')
-    title = paths[-1].split('_')[0]
+    title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
@@ -414,13 +414,13 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:6]
+        label = paths[i].split('_')[1:-4]
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label, legend=True)
     plt.xscale('log')
     plt.yscale('log')
     plt.grid()
-    title = paths[-1].split('_')[0]
+    title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'hp_eval')
@@ -434,24 +434,17 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
-    path_1 = 'nas101_100_False_False_False_0point_26_10_18_18'
-    path_2 = 'nas101_100_True_False_False_1point_26_10_18_36'
-    path_3 = 'nas101_100_True_False_False_2point_26_10_21_19'
-    path_4 = 'nas101_100_False_True_False_1point_26_10_22_39'
-    path_5 = 'nas101_100_False_True_False_2point_26_10_22_57'
-    path_6 = 'nas101_100_True_False_True_1point_27_10_02_55'
-    path_7 = 'nas101_100_True_False_True_2point_27_10_03_13'
-    path_8 = 'nas101_100_False_True_True_1point_27_10_12_36'
-    path_9 = 'nas101_100_False_True_True_2point_27_10_12_48'
+    folder = 'results/cifar100'
+    paths = []
+    for path in os.listdir(folder):
+        paths.append(folder + '/' + path)
 
-    paths = [path_1, path_2, path_3, path_4, path_5, path_6, path_7, path_8, path_9]
-    # paths = [path_1, path_4]
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
-    #
+
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
+    # visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
 
 
 if __name__ == '__main__':

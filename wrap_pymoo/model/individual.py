@@ -25,7 +25,6 @@ class MyIndividual:
     def get(self, key):
         if key in self.__dict__:
             return self.__dict__[key]
-        elif key in self.data:
+        if key in self.data:
             return self.data[key]
-        else:
-            return None
+        return None

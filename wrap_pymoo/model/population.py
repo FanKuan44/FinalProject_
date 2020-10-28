@@ -1,5 +1,6 @@
 import numpy as np
 from wrap_pymoo.model.individual import MyIndividual as Individual
+from pymoo.model.population import Population
 
 
 class MyPopulation(np.ndarray):
@@ -46,7 +47,7 @@ class MyPopulation(np.ndarray):
         for i in range(int(len(args) / 2)):
             key, values = args[i * 2], args[i * 2 + 1]
             if len(values) != len(self):
-                raise Exception("Population Set Attribute Error: Number of values and population size do not match!")
+                raise Exception('Population Set Attribute Error: Number of values and population size do not match!')
             for j in range(len(values)):
                 if key in self[j].__dict__:
                     self[j].__dict__[key] = values[j]
@@ -54,21 +55,27 @@ class MyPopulation(np.ndarray):
                     self[j].data[key] = values[j]
 
     def get(self, *args):
+
         val = {}
         for c in args:
             val[c] = []
 
         for i in range(len(self)):
+
             for c in args:
+
                 if c in self[i].__dict__:
                     val[c].append(self[i].__dict__[c])
                 elif c in self[i].data:
                     val[c].append(self[i].data[c])
         res = [val[c] for c in args]
+
         if len(args) == 1:
             return np.array(res[0])
         else:
             return tuple(res)
+
+        return np.array(val)
 
     def __array_finalize__(self, obj):
         if obj is None:
@@ -77,8 +84,7 @@ class MyPopulation(np.ndarray):
 
 
 if __name__ == '__main__':
-    Pop = MyPopulation(10)
-    Pop.get('F')
-    print(type(Pop))
-    x = Pop.new()
-    print(x)
+    Pop = MyPopulation(2)
+    Pop.set('X', [[[1, 1], [1, 2]], [[1, 2], [2, 3]]])
+    x = Pop.get('X')
+    print(type(x[0]), x)

@@ -42,17 +42,15 @@ class MySampling(Sampling):
 
         elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
             choices = ['I', '1', '2']
-            for i in range(n_samples):
-                while True:
-                    X = np.random.choice(choices, size=14)
-                    hashX = ''.join(X.tolist())
-                    if hashX not in pop_hashX:
-                        F = kwargs['algorithm'].evaluator.eval(
-                            problem, X, check=True, algorithm=kwargs['algorithm'])
-                        pop_F.append(F)
-                        pop_X.append(X)
-                        pop_hashX.append(hashX)
-                        break
+            while len(pop_X) < n_samples:
+                X = np.random.choice(choices, size=14)
+                hashX = ''.join(X.tolist())
+                if hashX not in pop_hashX:
+                    F = kwargs['algorithm'].evaluator.eval(
+                        problem, X, check=True, algorithm=kwargs['algorithm'])
+                    pop_F.append(F)
+                    pop_X.append(X)
+                    pop_hashX.append(hashX)
 
         pop_ = pop.new(n_samples)
 
