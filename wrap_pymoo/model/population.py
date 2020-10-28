@@ -2,6 +2,7 @@ import numpy as np
 from wrap_pymoo.model.individual import MyIndividual as Individual
 from pymoo.model.population import Population
 
+
 class MyPopulation(np.ndarray):
     def __new__(cls, n_individuals=0, individual=Individual(), *args, **kwargs):
         obj = super(MyPopulation, cls).__new__(cls, n_individuals, dtype=individual.__class__).view(cls)
@@ -53,14 +54,26 @@ class MyPopulation(np.ndarray):
                 else:
                     self[j].data[key] = values[j]
 
-    def get(self, key):
-        val = []
+    def get(self, *args):
+
+        val = {}
+        for c in args:
+            val[c] = []
 
         for i in range(len(self)):
-            if key in self[i].__dict__:
-                val.append(self[i].__dict__[key])
-            elif key in self[i].data:
-                val.append(self[i].data[key])
+
+            for c in args:
+
+                if c in self[i].__dict__:
+                    val[c].append(self[i].__dict__[c])
+                elif c in self[i].data:
+                    val[c].append(self[i].data[c])
+        res = [val[c] for c in args]
+
+        if len(args) == 1:
+            return np.array(res[0])
+        else:
+            return tuple(res)
 
         return np.array(val)
 
