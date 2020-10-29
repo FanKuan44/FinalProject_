@@ -1,5 +1,6 @@
 from nasbench import wrap_api as api
 from pymoo.model.sampling import Sampling
+from wrap_pymoo.model.population import MyPopulation as Population
 import numpy as np
 
 
@@ -7,10 +8,11 @@ class MySampling(Sampling):
     def __init__(self) -> None:
         super().__init__()
 
-    def sample(self, problem, pop, n_samples, **kwargs):
+    @staticmethod
+    def sample_custom(problem_name, n_samples, **kwargs):
         pop_X, pop_hashX, pop_F = [], [], []
 
-        if problem.problem_name == 'nas101':
+        if problem_name == 'nas101':
             benchmark_api = kwargs['algorithm'].benchmark_api
             INPUT = 'input'
             OUTPUT = 'output'
@@ -40,28 +42,26 @@ class MySampling(Sampling):
                             pop_hashX.append(module_hash_spec)
                             break
 
-        elif problem.problem_name == 'cifar10' or problem.problem_name == 'cifar100':
-            choices = ['I', '1', '2']
+        elif problem_name == 'cifar10' or problem_name == 'cifar100':
+            allowed_choices = ['I', '1', '2']
             while len(pop_X) < n_samples:
-                X = np.random.choice(choices, size=14)
-                hashX = ''.join(X.tolist())
-                if hashX not in pop_hashX:
-                    F = kwargs['algorithm'].evaluator.eval(
-                        problem, X, check=True, algorithm=kwargs['algorithm'])
-                    pop_F.append(F)
-                    pop_X.append(X)
-                    pop_hashX.append(hashX)
-
-        pop_ = pop.new(n_samples)
+                new_X = np.random.choice(allowed_choices, size=14)
+                new_hashX = ''.join(new_X.tolist())
+                if new_hashX not in pop_hashX:
+                    # F = kwargs['algorithm'].evaluator.eval(
+                    #     problem, X, check=True, algorithm=kwargs['algorithm'])
+                    # pop_F.append(F)
+                    pop_X.append(new_X)
+                    pop_hashX.append(new_hashX)
 
         CV = np.zeros((n_samples, 1))
         feasible = np.ones((n_samples, 1), dtype=np.bool)
 
-        pop_X, pop_hashX, pop_F = np.array(pop_X), np.array(pop_hashX), np.array(pop_F)
-
-        pop_.set('X', np.array(pop_X))
-        pop_.set('hashX', np.array(pop_hashX))
-        pop_.set('F', np.array(pop_F))
-        pop_.set('CV', CV)
-        pop_.set('feasible', feasible)
-        return pop_
+        # pop_X, pop_hashX, pop_F = np.array(pop_X), np.array(pop_hashX), np.array(pop_F)
+        pop = Population(n_samples)
+        pop.set('X', pop_X)
+        pop.set('hashX', pop_hashX)
+        # pop.set('F', np.array(pop_F))
+        pop.set('CV', CV)
+        pop.set('feasible', feasible)
+        return pop

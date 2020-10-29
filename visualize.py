@@ -239,8 +239,8 @@ def get_avg_dpfs_and_no_evaluations(paths):
             total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_dpfs.p', 'rb'))
 
             # Interpolation
-            new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + no_evaluations_gen_0,
-                                             no_evaluations_gen_0)
+            new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1,
+                                             50)
 
             f = interp1d(total_no_evaluations, total_dpfs)
             new_dpf_each_gen = f(new_no_eval_each_gen)
@@ -273,7 +273,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
                      axis_labels=axis_lbs, label=label, legend=True)
 
     plt.grid()
-    plt.xscale('log')
+    # plt.xscale('log')
     plt.yscale('log')
     title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
@@ -319,17 +319,17 @@ def find_max_f0_f1_min_f0_f1(paths):
     return min_f0, max_f0, min_f1, max_f1
 
 
-def cal_hyper_volume(hp, pareto_front):
+def cal_hyper_volume(hp, pareto_front, rf):
     # rf = [max_f0 + 1e-5, max_f1 + 1e-5]
     # tmp = [rf[0] - min_f0, rf[1] - min_f1]
     # hp = _HyperVolume(rf)
 
     hyper_volume = hp.compute(pareto_front)
-    return hyper_volume
+    return hyper_volume / np.prod(rf)
     # return 1 - hyper_volume / np.prod(tmp)
 
 
-def get_avg_hp_and_evaluate(paths, hp_calculate):
+def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
     hp_avg_each_path = []
     no_eval_avg_each_path = []
 
@@ -375,13 +375,20 @@ def get_avg_hp_and_evaluate(paths, hp_calculate):
             for file_i in range(number_of_files):
                 pf_approximate, no_eval = pickle.load(open(path_ + '/' + pf_and_eval_folder[file_i], 'rb'))
 
-                hp = cal_hyper_volume(hp=hp_calculate, pareto_front=pf_approximate)
+                hp = cal_hyper_volume(hp=hp_calculate, pareto_front=pf_approximate, rf=rf)
 
-                hp_each_gen.append(hp)
-                no_eval_each_gen.append(no_eval)
+                if len(hp_each_gen) == 0:
+                    hp_each_gen.append(hp)
+                    no_eval_each_gen.append(no_eval)
+                else:
+                    if no_eval == no_eval_each_gen[-1]:
+                        hp_each_gen[-1] = hp
+                    else:
+                        hp_each_gen.append(hp)
+                        no_eval_each_gen.append(no_eval)
 
             # Interpolation
-            new_no_eval_each_gen = np.arange(eval_gen_0, upper + eval_gen_0, eval_gen_0)
+            new_no_eval_each_gen = np.arange(eval_gen_0, upper + 1, 50)
 
             f = interp1d(no_eval_each_gen, hp_each_gen)
             new_hp_each_gen = f(new_no_eval_each_gen)
@@ -407,7 +414,7 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     rf = [max_f0 + 1e-5, max_f1 + 1e-5]
     hp_calculate = _HyperVolume(rf)
 
-    hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, hp_calculate)
+    hp_avg_each_path, no_eval_avg_each_path = get_avg_hp_and_evaluate(paths, hp_calculate, rf)
 
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'Hypervolume']
@@ -418,7 +425,7 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label, legend=True)
     plt.xscale('log')
-    plt.yscale('log')
+    # plt.yscale('log')
     plt.grid()
     title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
@@ -434,17 +441,20 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
-    folder = 'results/cifar100'
-    paths = []
-    for path in os.listdir(folder):
-        paths.append(folder + '/' + path)
+    # folder = 'results/cifar10'
+    # paths = []
+    # for path in os.listdir(folder):
+    #     paths.append(folder + '/' + path)
+
+    paths = ['cifar10_nsga_100_False_False_0_False_False_0_29_10_19_01',
+             'cifar10_nsga_100_False_True_1_False_False_0_29_10_19_32']
 
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    # visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
+    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
 
 
 if __name__ == '__main__':
