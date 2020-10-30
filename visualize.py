@@ -53,24 +53,6 @@ from datetime import datetime
 from pymoo.indicators.hv import _HyperVolume
 from scipy.interpolate import interp1d
 
-now = datetime.now()
-dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')
-try:
-    os.mkdir('fig/' + dir_name)
-except FileExistsError:
-    pass
-
-
-# def check_better(x1, x2):
-#     if x1[0] <= x2[0] and x1[1] < x2[1]:
-#         return 'obj1'
-#     if x1[1] <= x2[1] and x1[0] < x2[0]:
-#         return 'obj1'
-#     if x2[0] <= x1[0] and x2[1] < x1[1]:
-#         return 'obj2'
-#     if x2[1] <= x1[1] and x2[0] < x1[0]:
-#         return 'obj2'
-
 
 def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), legend=False):
     place_to_plot.plot(objective_0, objective_1, label=label)
@@ -217,8 +199,8 @@ def get_avg_dpfs_and_no_evaluations(paths):
     no_evaluations_avg_each_path = []
 
     for path in paths:
-        dpfs_each_exp = []
         no_evaluations_each_exp = []
+        dpfs_each_exp = []
 
         number_of_experiments = len(os.listdir(path))
         min_total_no_evaluations = np.inf
@@ -260,7 +242,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
     return dpfs_avg_each_path, no_evaluations_avg_each_path
 
 
-def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False):
+def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
     dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'DPFS']
@@ -268,13 +250,14 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
-
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label, legend=True)
 
     plt.grid()
-    # plt.xscale('log')
-    plt.yscale('log')
+    if log_x:
+        plt.xscale('log')
+    if log_y:
+        plt.yscale('log')
     title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
     if save_fig:
@@ -408,7 +391,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
     return hp_avg_each_path, no_eval_avg_each_path
 
 
-def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False):
+def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
     min_f0, max_f0, min_f1, max_f1 = find_max_f0_f1_min_f0_f1(paths)
 
     rf = [max_f0 + 1e-5, max_f1 + 1e-5]
@@ -421,11 +404,14 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
+        # pickle.dump([no_eval_avg_each_path[i], hp_avg_each_path[i]], open(f'{paths[i]}_hp.p', 'wb'))
         label = paths[i].split('_')[1:-4]
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label, legend=True)
-    plt.xscale('log')
-    # plt.yscale('log')
+    if log_x:
+        plt.xscale('log')
+    if log_y:
+        plt.yscale('log')
     plt.grid()
     title = paths[-1].split('_')[0].split('/')[-1]
     plt.title(title)
@@ -441,21 +427,23 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
-    # folder = 'results/cifar10'
-    # paths = []
-    # for path in os.listdir(folder):
-    #     paths.append(folder + '/' + path)
+    folder = 'results/cifar10(moead)'
+    paths = []
+    for path in os.listdir(folder):
+        paths.append(folder + '/' + path)
 
-    paths = ['cifar10_nsga_100_False_False_0_False_False_0_29_10_19_01',
-             'cifar10_nsga_100_False_True_1_False_False_0_29_10_19_32']
-
-    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
+    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=True, log_y=False)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False)
+    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=True, log_y=False)
 
 
 if __name__ == '__main__':
+    SAVE = False
+    if SAVE:
+        now = datetime.now()
+        dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')
+        os.mkdir('fig/' + dir_name)
     main()

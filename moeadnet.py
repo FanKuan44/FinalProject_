@@ -1,32 +1,28 @@
 import argparse
-import copy
 import os
 import pickle as pk
 import timeit
-from datetime import datetime
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
+from datetime import datetime
+
+from pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
+from pymoo.cython.decomposition import Tchebicheff
 from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
 from pymoo.operators.default_operators import set_if_none
 from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
 from pymoo.operators.sampling.random_sampling import RandomSampling
-from pymoo.operators.selection.tournament_selection import compare, TournamentSelection
 from pymoo.rand import random
-from pymoo.util.display import disp_multi_objective
-from pymoo.util.dominator import Dominator
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
-from pymoo.util.randomized_argsort import randomized_argsort
+from pymoo.util.display import disp_multi_objective
+from pymoo.util.reference_direction import UniformReferenceDirectionFactory
+from scipy.spatial.distance import cdist
 
 from acc_predictor.factory import get_acc_predictor
-# =========================================================================================================
-# Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
-# =========================================================================================================
 from nasbench import wrap_api as api
 from nasbench.lib import model_spec
-from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
-from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.util.compare import find_better_idv, find_better_idv_bosman_ver
 from wrap_pymoo.util.dpfs_calculating import cal_dpfs
@@ -34,6 +30,10 @@ from wrap_pymoo.util.elitist_archive import update_elitist_archive
 from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
 
 ModelSpec = model_spec.ModelSpec
+
+# =========================================================================================================
+# Implementation
+# =========================================================================================================
 
 
 def encode(X):
@@ -44,27 +44,47 @@ def encode(X):
     return encode_X
 
 
-class NSGANet(GeneticAlgorithm):
+class MOEADNET(GeneticAlgorithm):
     def __init__(self,
                  max_no_evaluations,
-                 crossover_type,
                  using_surrogate_model,
                  update_model_after_n_gens,
                  path,
+                 ref_dirs,
+                 n_neighbors=20,
+                 prob_neighbor_mating=0.7,
                  **kwargs):
 
-        set_if_none(kwargs, 'individual', Individual(rank=np.inf, crowding=-1))
+        self.n_neighbors = n_neighbors
+        self.prob_neighbor_mating = prob_neighbor_mating
+
+        self._decomposition = None
+        self.ideal_point = None
+
+        set_if_none(kwargs, 'pop_size', len(ref_dirs))
         set_if_none(kwargs, 'sampling', RandomSampling())
         set_if_none(kwargs, 'crossover', SimulatedBinaryCrossover(prob=1.0, eta=20))
         set_if_none(kwargs, 'mutation', PolynomialMutation(prob=None, eta=20))
+        set_if_none(kwargs, 'survival', None)
+        set_if_none(kwargs, 'selection', None)
+
         super().__init__(**kwargs)
 
-        self.tournament_type = 'comp_by_dom_and_crowding'
         self.func_display_attrs = disp_multi_objective
 
-        ''' Custom '''
-        self.crossover_type = crossover_type
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
+        self.ref_dirs = ref_dirs
+
+        if self.ref_dirs.shape[0] < self.n_neighbors:
+            print('Setting number of neighbors to number of reference directions : %s' % self.ref_dirs.shape[0])
+            self.n_neighbors = self.ref_dirs.shape[0]
+
+        # neighbours includes the entry by itself intentionally for the survival method
+        self.neighbors = np.argsort(cdist(self.ref_dirs, self.ref_dirs), axis=1, kind='quicksort')[:, :self.n_neighbors]
+
+        ''' customize '''
+        self.elitist_archive_X = []
+        self.elitist_archive_hashX = []
+        self.elitist_archive_F = []
 
         self.dpfs = []
         self.no_eval = []
@@ -161,11 +181,6 @@ class NSGANet(GeneticAlgorithm):
         return F
 
     @staticmethod
-    def _create_surrogate_model(inputs, targets):
-        surrogate_model = get_acc_predictor('mlp', inputs, targets)
-        return surrogate_model
-
-    @staticmethod
     def _sampling(n_samples):
         pop = Population(n_samples)
         pop_X, pop_hashX = [], []
@@ -209,232 +224,100 @@ class NSGANet(GeneticAlgorithm):
 
         return pop
 
-    @staticmethod
-    def _crossover(pop, type_crossover='UX'):
-        pop_X, pop_hashX = pop.get('X'), pop.get('hashX')
+    def _initialize_custom(self):
+        self._decomposition = Tchebicheff()
 
-        offspring_X, offspring_hashX = [], []
+        if self.using_surrogate_model:
+            # Khoi tao 1 so luong kien truc mang de train surrogate model
+            models_sampling = self._sampling(500)
+            models_sampling_F = self.true_evaluate(models_sampling.get('X'))
+            models_sampling.set('F', models_sampling_F)
 
-        n_crossovers = 0
-        flag = False
+            self.surrogate_model, _ = self._fit_acc_predictor(inputs=encode(models_sampling.get('X')),
+                                                              targets=models_sampling_F[:, 1])
+            print('-> initialize surrogate model - done')
+            idxs = random.perm(500)
+            pop = models_sampling[idxs[:self.pop_size]]
+        else:
+            pop = self._sampling(self.pop_size)
+            pop_F = self.true_evaluate(X=pop.get('X'))
+            pop.set('F', pop_F)
 
-        while len(offspring_X) < len(pop_X):
-            if n_crossovers > 100:
-                flag = True
+        self.ideal_point = np.min(pop.get('F'), axis=0)
 
-            idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
-            pop_X_ = pop.get('X')[idx]
-
-            if BENCHMARK_NAME == 'nas101':
-                for i in range(len(pop_X_)):
-                    if type_crossover == 'UX':
-                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
-
-                        crossover_pts = np.random.randint(0, 2, offspring1_X[-1].shape, dtype=np.bool)
-
-                        offspring1_X[-1][crossover_pts], offspring2_X[-1][crossover_pts] = \
-                            offspring2_X[-1][crossover_pts], offspring1_X[-1][crossover_pts].copy()
-
-                        module_spec1 = api.ModelSpec(matrix=np.array(offspring1_X[:-1], dtype=np.int),
-                                                     ops=offspring1_X[-1].tolist())
-                        module_spec2 = api.ModelSpec(matrix=np.array(offspring2_X[:-1], dtype=np.int),
-                                                     ops=offspring2_X[-1].tolist())
-
-                        offspring1_hashX = BENCHMARK_API.get_module_hash(module_spec1)
-                        offspring2_hashX = BENCHMARK_API.get_module_hash(module_spec2)
-
-                        offsprings_X = [offspring1_X, offspring2_X]
-                        checked_specs = [module_spec1, module_spec2]
-                        checked_hashX = [offspring1_hashX, offspring2_hashX]
-
-                        for j in range(2):
-                            if BENCHMARK_API.is_valid(checked_specs[j]):
-                                if not flag:
-                                    if (checked_hashX[j] not in offspring_hashX) and \
-                                            (checked_hashX[j] not in pop_hashX):
-                                        offspring_X.append(offsprings_X[j])
-                                        offspring_hashX.append(checked_hashX[j])
-                                else:
-                                    offspring_X.append(offsprings_X[j])
-                                    offspring_hashX.append(checked_hashX[j])
-                            else:
-                                print('invalid-crossover')
-                    else:
-                        # 2 points crossover
-                        parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
-                        parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
-
-                        points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
-
-                        low = points_crossover[0]
-                        if low > points_crossover[1]:
-                            high = low
-                            low = points_crossover[1]
-                        else:
-                            high = points_crossover[1]
-
-                        parent1_matrix[low:high], parent2_matrix[low:high] = \
-                            parent2_matrix[low:high], parent1_matrix[low: high].copy()
-                        parent1_ops[low:high], parent2_ops[low:high] = \
-                            parent2_ops[low:high], parent1_ops[low:high].copy()
-
-                        idv_check = [[parent1_matrix, parent1_ops], [parent2_matrix, parent2_ops]]
-                        for idv in idv_check:
-                            spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
-                            if BENCHMARK_API.is_valid(spec):
-                                module_hash_spec = BENCHMARK_API.get_module_hash(spec)
-                                X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
-
-                                if not flag:
-                                    if (module_hash_spec not in offspring_hashX) and \
-                                            (module_hash_spec not in pop_hashX):
-                                        offspring_X.append(X)
-                                        offspring_hashX.append(module_hash_spec)
-                                else:
-                                    offspring_X.append(X)
-                                    offspring_hashX.append(module_hash_spec)
-
-            elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                for i in range(len(pop_X_)):
-                    offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
-
-                    if type_crossover == '1X':
-                        crossover_pt = np.random.randint(1, len(offspring1_X))
-
-                        offspring1_X[crossover_pt:], offspring2_X[crossover_pt:] = \
-                            offspring2_X[crossover_pt:], offspring1_X[crossover_pt:].copy()
-
-                    elif type_crossover == 'UX':
-                        crossover_pts = np.random.randint(0, 2, offspring1_X.shape, dtype=np.bool)
-
-                        offspring1_X[crossover_pts], offspring2_X[crossover_pts] = \
-                            offspring2_X[crossover_pts], offspring1_X[crossover_pts].copy()
-
-                    offspring1_hashX = ''.join(offspring1_X.tolist())
-                    offspring2_hashX = ''.join(offspring2_X.tolist())
-
-                    if not flag:
-                        if (offspring1_hashX not in offspring_hashX) and (offspring1_hashX not in pop_hashX):
-                            offspring_X.append(offspring1_X)
-                            offspring_hashX.append(offspring1_hashX)
-
-                        if (offspring2_hashX not in offspring_hashX) and (offspring2_hashX not in pop_hashX):
-                            offspring_X.append(offspring2_X)
-                            offspring_hashX.append(offspring2_hashX)
-                    else:
-                        offspring_X.append(offspring1_X)
-                        offspring_hashX.append(offspring1_hashX)
-
-                        offspring_X.append(offspring2_X)
-                        offspring_hashX.append(offspring2_hashX)
-
-            n_crossovers += 1
-
-        idxs = random.perm(len(offspring_X))
-
-        offspring_X = np.array(offspring_X)[idxs[:len(pop_X)]]
-        offspring_hashX = np.array(offspring_hashX)[idxs[:len(pop_X)]]
-
-        if flag:
-            print('exist duplicate - crossover')
-        # -----------------------------------
-        offspring = Population(len(pop))
-
-        offspring.set('X', offspring_X)
-        offspring.set('hashX', offspring_hashX)
-        return offspring
+        return pop
 
     @staticmethod
-    def _mutation(pop, old_offsprings, prob_mutation=0.05):
-        pop_X = pop.get('X')
+    def _crossover(pop, parents_idx):
+        pop_hashX = pop.get('hashX')
+
+        parents_X = pop[parents_idx].get('X')
+
+        offsprings = Population(len(parents_idx))
+        offsprings_X = []
+        offsprings_hashX = []
+
+        crossover_count = 0
+        while len(offsprings_X) < len(parents_idx):
+            crossover_count += 1
+
+            crossover_pt = np.random.randint(1, len(parents_X[0]) - 1)
+
+            tmp_offsprings_X = parents_X.copy()
+
+            tmp_offsprings_X[0][crossover_pt:], tmp_offsprings_X[1][crossover_pt:] = \
+                tmp_offsprings_X[1][crossover_pt:], tmp_offsprings_X[0][crossover_pt:].copy()
+
+            tmp_offsprings_hashX = [''.join(tmp_offsprings_X[0].tolist()), ''.join(tmp_offsprings_X[0].tolist())]
+
+            for i in range(len(tmp_offsprings_hashX)):
+                if crossover_count < 100:
+                    if (tmp_offsprings_hashX[i] not in pop_hashX) and (tmp_offsprings_hashX[i] not in offsprings_hashX):
+                        offsprings_X.append(tmp_offsprings_X[i])
+                        offsprings_hashX.append(tmp_offsprings_hashX[i])
+                else:
+                    offsprings_X.append(tmp_offsprings_X[i])
+                    offsprings_hashX.append(tmp_offsprings_hashX[i])
+
+        offsprings.set('X', offsprings_X[:len(parents_idx)])
+        offsprings.set('hashX', offsprings_hashX[:len(parents_idx)])
+        return offsprings
+
+    @staticmethod
+    def _mutation(pop, old_offsprings, prob_mutation):
         pop_hashX = pop.get('hashX')
 
         new_offsprings = Population(len(old_offsprings))
-
         new_offsprings_X = []
         new_offsprings_hashX = []
 
         old_offsprings_X = old_offsprings.get('X')
 
         while len(new_offsprings_X) < len(old_offsprings):
-            if BENCHMARK_NAME == 'nas101':
-                for x in pop_X:
-                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
-                    new_ops = copy.deepcopy(x[-1, :])
-                    # In expectation, V edges flipped (note that most end up being pruned).
-                    # edge_mutation_prob = 1 / 7
-                    for src in range(0, 7 - 1):
-                        for dst in range(src + 1, 7):
-                            if np.random.rand() < prob_mutation:
-                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
+            for i in range(len(old_offsprings_X)):
+                tmp_new_offspring_X = old_offsprings_X[i].copy()
 
-                    # In expectation, one op is resampled.
-                    # op_mutation_prob = 1 / 5
-                    for ind in range(1, 7 - 1):
-                        if np.random.rand() < prob_mutation:
-                            available = [o for o in BENCHMARK_API.config['available_ops'] if o != new_ops[ind]]
-                            new_ops[ind] = np.random.choice(available)
-                    new_modelspec = api.ModelSpec(new_matrix, new_ops.tolist())
+                prob_mutation_idxs = np.random.rand(len(old_offsprings_X[i]))
+                for j in range(len(prob_mutation_idxs)):
+                    if prob_mutation_idxs[j] < prob_mutation:
+                        allowed_choices = ['I', '1', '2']
+                        allowed_choices.remove(tmp_new_offspring_X[j])
 
-                    if BENCHMARK_API.is_valid(new_modelspec):
-                        hashX = BENCHMARK_API.get_module_hash(new_modelspec)
-                        if (hashX not in new_offsprings_hashX) and \
-                                (hashX not in pop_hashX):
-                            new_offsprings_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
-                            new_offsprings_hashX.append(hashX)
+                        tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
 
-            elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                prob_mutation_idxs = np.random.rand(old_offsprings_X.shape[0], old_offsprings_X.shape[1])
+                tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
+                if (tmp_new_offspring_hashX not in pop_hashX) and (tmp_new_offspring_hashX not in new_offsprings_hashX):
+                    new_offsprings_X.append(tmp_new_offspring_X)
+                    new_offsprings_hashX.append(tmp_new_offspring_hashX)
 
-                for i in range(len(old_offsprings_X)):
-                    tmp_new_offspring_X = old_offsprings_X[i].copy()
-
-                    for j in range(prob_mutation_idxs.shape[1]):
-                        if prob_mutation_idxs[i][j] <= prob_mutation:
-                            allowed_choices = ['I', '1', '2']
-                            allowed_choices.remove(tmp_new_offspring_X[j])
-
-                            tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
-
-                    tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
-
-                    if (tmp_new_offspring_hashX not in new_offsprings_hashX) and \
-                            (tmp_new_offspring_hashX not in pop_hashX):
-                        new_offsprings_X.append(tmp_new_offspring_X)
-                        new_offsprings_hashX.append(tmp_new_offspring_hashX)
-
-        idxs = random.perm(len(new_offsprings_X))
-
-        new_offsprings_X = np.array(new_offsprings_X)[idxs[:len(pop)]]
-        new_offspring_hashX = np.array(new_offsprings_hashX)[idxs[:len(pop)]]
-
-        new_offsprings.set('X', new_offsprings_X)
-        new_offsprings.set('hashX', new_offspring_hashX)
-
-        # USING FOR CHECKING DUPLICATE
-        for i in range(len(new_offsprings_hashX) - 1):
-            if new_offsprings_hashX[i] in new_offsprings_hashX[i + 1:]:
-                print(new_offsprings_hashX[i])
-
-        for hashX in new_offsprings_hashX:
-            if hashX in pop_hashX:
-                print('duplicate - mutation - pop', hashX)
-                break
-        # -----------------------------------
+        new_offsprings.set('X', new_offsprings_X[:len(old_offsprings)])
+        new_offsprings.set('hashX', new_offsprings_hashX[:len(old_offsprings)])
         return new_offsprings
 
-    def _initialize_custom(self):
-        pop = self._sampling(self.pop_size)
-        pop_F = self.true_evaluate(X=pop.get('X'))
-        pop.set('F', pop_F)
-        if self.using_surrogate_model:
-            self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
-                                                                targets=pop_F[:, 1])
-            print('-> initialize surrogate model - done')
-
-        pop = self.survival.do(pop, self.pop_size)
-
-        return pop
+    @staticmethod
+    def _fit_acc_predictor(inputs, targets):
+        acc_predictor = get_acc_predictor('mlp', inputs, targets)
+        return acc_predictor, acc_predictor.predict(inputs)
 
     def local_search_on_X(self, pop, X, ls_on_knee_solutions=False):
         off_ = pop.new()
@@ -596,7 +479,7 @@ class NSGANet(GeneticAlgorithm):
                         elif better_idv == 0:
                             non_dominance_X.append(x_new_X)
                             non_dominance_hashX.append(x_new_hashX)
-                            if USING_SURROGATE_MODEL:
+                            if self.using_surrogate_model:
                                 non_dominance_F.append(true_x_new_F)
                             else:
                                 non_dominance_F.append(x_new_F)
@@ -750,13 +633,92 @@ class NSGANet(GeneticAlgorithm):
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
     def _next(self, pop):
-        offsprings = self._mating(pop)
+        if self.using_surrogate_model:
+            if self.n_gen % self.update_model_after_n_gens == 0:
+                if len(self.models_for_training) < 500:
+                    x = np.array(self.models_for_training)
+                    self.models_for_training = []
+                else:
+                    idxs = random.perm(len(self.models_for_training))
+                    x = np.array(self.models_for_training)[idxs[:500]]
+                    self.models_for_training = self.models_for_training[idxs[500:]]
+                y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
+                self.surrogate_model.fit(x=encode(x), y=y)
+                print('Update surrogate model - Done')
 
-        # merge the offsprings with the current population
-        pop = pop.merge(offsprings)
+        # iterate for each member of the population in random order
+        idxs = random.perm(len(pop))
+        for idx in idxs:
+            # all neighbors of this individual and corresponding weights
+            N = self.neighbors[idx, :]
+            '''
+            N: bieu dien vi tri neighbor cua ca the thu idx trong quan the
 
-        # the do survival selection
-        pop = self.survival.do(pop, self.pop_size)
+            Ngau nhien phat sinh 1 so tu [0, 1]
+            - neu nho hon prob_neighbor_mating thi tien hanh lai ghep giua 2 
+            neighbor ngau nhien
+            - nguoc lai thi chon ngau nhien 2 ca the trong quan the va tien hanh lai ghep
+            '''
+            if random.random() < self.prob_neighbor_mating:
+                parents_idx = N[random.perm(self.n_neighbors)][:self.crossover.n_parents]
+            else:
+                parents_idx = random.perm(self.pop_size)[:self.crossover.n_parents]
+
+            ''' crossover '''
+            offsprings = self._crossover(pop=pop, parents_idx=parents_idx)
+
+            if self.using_surrogate_model:
+                offsprings_fake_F = self.fake_evaluate(X=offsprings.get('X'))
+
+                tmp = offsprings[offsprings_fake_F[:, 1] < 0.1].get('X')
+                if len(tmp) != 0:
+                    self.models_for_training.extend(tmp)
+                offsprings.set('F', offsprings_fake_F)
+
+                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
+            else:
+                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+                offsprings.set('F', offsprings_true_F)
+
+            ''' update elitist archive (crossover) '''
+            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+                update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
+                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+
+            ''' mutation '''
+            offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
+
+            if self.using_surrogate_model:
+                offsprings_fake_F = self.fake_evaluate(X=offsprings.get('X'))
+
+                tmp = offsprings[offsprings_fake_F[:, 1] < 0.1].get('X')
+                if len(tmp) != 0:
+                    self.models_for_training.extend(tmp)
+                offsprings.set('F', offsprings_fake_F)
+
+                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
+            else:
+                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+                offsprings.set('F', offsprings_true_F)
+
+            ''' update elitist archive (mutation) '''
+            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+                update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
+                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+
+            offspring = offsprings[random.randint(0, len(offsprings))]
+            offspring_F = offspring.get('F')
+
+            # update the ideal point
+            self.ideal_point = np.min(np.vstack([self.ideal_point, offspring_F]), axis=0)
+
+            # calculate the decomposed values for each neighbor
+            FV = self._decomposition.do(pop[N].get('F'), weights=self.ref_dirs[N, :], ideal_point=self.ideal_point)
+            off_FV = self._decomposition.do(offspring_F, weights=self.ref_dirs[N, :], ideal_point=self.ideal_point)
+
+            # get the absolute index in F where offspring is better than the current F (decomposed space)
+            I = np.where(off_FV < FV)[0]
+            pop[N[I]] = offspring
 
         ''' Local Search on PF '''
         if LOCAL_SEARCH_ON_PARETO_FRONT:
@@ -851,32 +813,6 @@ class NSGANet(GeneticAlgorithm):
 
         return pop
 
-    def _mating(self, pop):
-        # crossover
-        offsprings = self._crossover(pop=pop, type_crossover=self.crossover_type)
-
-        # evaluate offsprings - crossover
-        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
-        offsprings.set('F', offsprings_true_F)
-
-        # update elitist archive - crossover
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-        # mutation
-        offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
-
-        # evaluate offsprings - mutation
-        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
-        offsprings.set('F', offsprings_true_F)
-
-        # update elitist archive - mutation
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-        return offsprings
-
     def solve_custom(self):
         self.n_gen = 1
 
@@ -898,27 +834,14 @@ class NSGANet(GeneticAlgorithm):
 
             self._do_each_gen()
 
+            if self.n_gen == 20:
+                self.using_surrogate_model = False
+
         self._finalize()
         return
 
     def _do_each_gen(self):
-        if self.max_no_evaluations - self.no_evaluations > self.max_no_evaluations // 3:
-            if self.using_surrogate_model:
-                if self.n_gen % self.update_model_after_n_gens == 0:
-                    if len(self.models_for_training) < 500:
-                        x = np.array(self.models_for_training)
-                        self.models_for_training = []
-                    else:
-                        idxs = random.perm(len(self.models_for_training))
-                        x = np.array(self.models_for_training)[idxs[:500]]
-                        self.models_for_training = np.array(self.models_for_training)[idxs[500:]].tolist()
-
-                    y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
-                    self.surrogate_model.fit(x=encode(x), y=y)
-                    print('Update surrogate model - Done')
-
         # print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
-
         if SAVE:
             pf = self.elitist_archive_F
             pf = pf[np.argsort(pf[:, 0])]
@@ -947,8 +870,7 @@ class NSGANet(GeneticAlgorithm):
 
             plt.scatter(BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1], facecolors='none', edgecolors='blue', s=40,
                         label='true pf')
-            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15,
-                        label='elitist archive')
+            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15, label='elitist archive')
             plt.xlabel('MMACs (normalize)')
             plt.ylabel('validation error')
             plt.legend()
@@ -956,132 +878,25 @@ class NSGANet(GeneticAlgorithm):
             plt.savefig(f'{self.path}/final_pf')
             plt.clf()
 
-
-# ---------------------------------------------------------------------------------------------------------
-# Binary Tournament Selection Function
-# ---------------------------------------------------------------------------------------------------------
-
-
-def binary_tournament(pop, P, algorithm):
-    if P.shape[1] != 2:
-        raise ValueError("Only implemented for binary tournament!")
-    tournament_type = algorithm.tournament_type
-    S = np.full(P.shape[0], np.nan)
-    for i in range(P.shape[0]):
-
-        a, b = P[i, 0], P[i, 1]
-
-        if tournament_type == 'comp_by_dom_and_crowding':
-            rel = Dominator.get_relation(pop[a].F, pop[b].F)
-            if rel == 1:
-                S[i] = a
-            elif rel == -1:
-                S[i] = b
-
-        elif tournament_type == 'comp_by_rank_and_crowding':
-            S[i] = compare(a, pop[a].rank, b, pop[b].rank,
-                           method='smaller_is_better')
-
-        else:
-            raise Exception("Unknown tournament type.")
-
-        if np.isnan(S[i]):
-            S[i] = compare(a, pop[a].get("crowding"), b, pop[b].get("crowding"),
-                           method='larger_is_better', return_random_if_equal=True)
-    return S[:, None].astype(np.int)
-
-
-# ---------------------------------------------------------------------------------------------------------
-# Survival Selection
-# ---------------------------------------------------------------------------------------------------------
-
-
-class RankAndCrowdingSurvival:
-
-    @staticmethod
-    def do(pop, n_survive):
-        # get the objective space values and objects
-        F = pop.get('F')
-
-        # the final indices of surviving individuals
-        survivors = []
-
-        # do the non-dominated sorting until splitting front
-        fronts = NonDominatedSorting().do(F, n_stop_if_ranked=n_survive)
-
-        for k, front in enumerate(fronts):
-
-            # calculate the crowding distance of the front
-            crowding_of_front = calc_crowding_distance(F[front, :])
-
-            # save rank and crowding in the individual class
-            for j, i in enumerate(front):
-                pop[i].set('rank', k)
-                pop[i].set('crowding', crowding_of_front[j])
-
-            # current front sorted by crowding distance if splitting
-            if len(survivors) + len(front) > n_survive:
-                I = randomized_argsort(crowding_of_front, order='descending', method='numpy')
-                I = I[:(n_survive - len(survivors))]
-
-            # otherwise take the whole front unsorted
-            else:
-                I = np.arange(len(front))
-
-            # extend the survivors by all or selected individuals
-            survivors.extend(front[I])
-        return pop[survivors]
-
-
-def calc_crowding_distance(F):
-    infinity = 1e+14
-
-    n_points = F.shape[0]
-    n_obj = F.shape[1]
-
-    if n_points <= 2:
-        return np.full(n_points, infinity)
-    else:
-
-        # sort each column and get index
-        I = np.argsort(F, axis=0, kind='mergesort')
-
-        # now really sort the whole array
-        F = F[I, np.arange(n_obj)]
-
-        # get the distance to the last element in sorted list and replace zeros with actual values
-        dist = np.concatenate([F, np.full((1, n_obj), np.inf)]) - np.concatenate([np.full((1, n_obj), -np.inf), F])
-
-        index_dist_is_zero = np.where(dist == 0)
-
-        dist_to_last = np.copy(dist)
-        for i, j in zip(*index_dist_is_zero):
-            dist_to_last[i, j] = dist_to_last[i - 1, j]
-
-        dist_to_next = np.copy(dist)
-        for i, j in reversed(list(zip(*index_dist_is_zero))):
-            dist_to_next[i, j] = dist_to_next[i + 1, j]
-
-        # normalize all the distances
-        norm = np.max(F, axis=0) - np.min(F, axis=0)
-        norm[norm == 0] = np.nan
-        dist_to_last, dist_to_next = dist_to_last[:-1] / norm, dist_to_next[1:] / norm
-
-        # if we divided by zero because all values in one columns are equal replace by none
-        dist_to_last[np.isnan(dist_to_last)] = 0.0
-        dist_to_next[np.isnan(dist_to_next)] = 0.0
-
-        # sum up the distance to next and last and norm by objectives - also reorder from sorted list
-        J = np.argsort(I, axis=0)
-        crowding = np.sum(dist_to_last[J, np.arange(n_obj)] + dist_to_next[J, np.arange(n_obj)], axis=1) / n_obj
-
-    # replace infinity with a large number
-    crowding[np.isinf(crowding)] = infinity
-    return crowding
+    # def reset_params(self):
+    #     self._decomposition = None
+    #     self.ideal_point = None
+    #
+    #     self.elitist_archive_X = []
+    #     self.elitist_archive_hashX = []
+    #     self.elitist_archive_F = []
+    #
+    #     self.dpfs = []
+    #     self.no_eval = []
+    #
+    #     self.surrogate_model = None
+    #     self.models_for_training = []
+    #
+    #     self.no_evaluations = 0
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('NSGAII for NAS')
+    parser = argparse.ArgumentParser('MOEAD for NAS')
 
     # hyper-parameters for problem
     parser.add_argument('--benchmark_name', type=str, default='cifar10',
@@ -1093,18 +908,18 @@ if __name__ == '__main__':
     parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
     parser.add_argument('--save', type=int, default=1, help='save log file')
 
-    # hyper-parameters for algorithm (NSGAII)
-    parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
-    parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
-    parser.add_argument('--crossover_type', type=str, default='UX')
+    # hyper-parameters for algorithm (MOEAD)
+    parser.add_argument('--algorithm_name', type=str, default='moead', help='name of algorithm used')
+    parser.add_argument('--n_points', type=int, default=100)
+
+    parser.add_argument('--using_surrogate_model', type=int, default=0)
+    parser.add_argument('--update_model_after_n_gens', type=int, default=10)
 
     parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
     parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
     parser.add_argument('--local_search_on_n_points', type=int, default=1)
     parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
 
-    parser.add_argument('--using_surrogate_model', type=int, default=0)
-    parser.add_argument('--update_model_after_n_gens', type=int, default=10)
     args = parser.parse_args()
 
     BENCHMARK_NAME = args.benchmark_name
@@ -1134,12 +949,10 @@ if __name__ == '__main__':
 
     SAVE = bool(args.save)
 
-    MAX_NO_EVALUATIONS = args.max_no_evaluations
-
     ALGORITHM_NAME = args.algorithm_name
 
-    POP_SIZE = args.pop_size
-    CROSSOVER_TYPE = args.crossover_type
+    N_POINTS = args.n_points
+    MAX_NO_EVALUATIONS = args.max_no_evaluations
 
     LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
     LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
@@ -1153,7 +966,7 @@ if __name__ == '__main__':
     INIT_SEED = args.seed
 
     now = datetime.now()
-    dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_'
+    dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{N_POINTS}_'
                             f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
                             f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
                             f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
@@ -1183,22 +996,22 @@ if __name__ == '__main__':
         os.mkdir(sub_path + '/visualize_pf_each_gen')
         print(f'--> Create folder {sub_path}/visualize_pf_each_gen - Done\n')
 
-        net = NSGANet(
+        INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=N_POINTS).do()
+        net = MOEADNET(
             max_no_evaluations=MAX_NO_EVALUATIONS,
-            pop_size=POP_SIZE,
-            selection=TournamentSelection(func_comp=binary_tournament),
-            survival=RankAndCrowdingSurvival(),
-            crossover_type=CROSSOVER_TYPE,
             using_surrogate_model=USING_SURROGATE_MODEL,
             update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-            path=sub_path)
+            path=sub_path,
+            ref_dirs=INIT_REF_DIRS,
+            n_neighbors=10,
+            prob_neighbor_mating=1.0)
 
         start = timeit.default_timer()
         print(f'--> Experiment {i_run + 1} running')
         net.solve_custom()
         end = timeit.default_timer()
 
-        print(f'--> The number of runs done: {i_run + 1}/{NUMBER_OF_RUNS}')
+        print(f'--> The number of runs DONE: {i_run + 1}/{NUMBER_OF_RUNS}')
         print(f'--> Took {end - start} seconds\n')
 
     print(f'All {NUMBER_OF_RUNS} runs - Done\nResults are saved on folder {root_path}')
