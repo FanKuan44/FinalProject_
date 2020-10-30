@@ -1,7 +1,14 @@
+import argparse
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
-import pickle
+import os
+import pickle as pk
+import timeit
+import torch
 
+from acc_predictor.factory import get_acc_predictor
+from datetime import datetime
 from nasbench.lib import model_spec
 
 from pymoo.docs import parse_doc_string
@@ -35,127 +42,21 @@ from nasbench import wrap_api as api
 ModelSpec = model_spec.ModelSpec
 
 
-# def find_better_idv(f1, f2, position=None):
-#     """
-#     Kiem tra xem ca the nao tot hon.
-#     Neu ca the do nam o vi tri dau hoac cuoi thi chi xet 1 trong 2 fitness value, con lai thi xet binh thuong.
-#     =========================================================================================================
-#
-#     Parameters:
-#     ----------
-#     :param f1: fitness value of first individual
-#     :param f2: fitness value of second individual
-#     :param position: position of individual in pareto front or set of knee solutions (first, last, none)
-#     =========================================================================================================
-#
-#     Returns:
-#     ------
-#     :return:
-#     1: individual 1
-#     2: individual 2
-#     0: non-dominated
-#     """
-#     if position is None:
-#         if (f1[0] <= f2[0] and f1[1] < f2[1]) or (f1[0] < f2[0] and f1[1] <= f2[1]):
-#             return 1
-#         if (f2[0] <= f1[0] and f2[1] < f1[1]) or (f2[0] < f1[0] and f2[1] <= f1[1]):
-#             return 2
-#     elif position == 'first':
-#         if f1[0] < f2[0]:
-#             return 1
-#         if f2[0] <= f1[0]:
-#             return 2
-#     else:
-#         if f1[1] < f2[1]:
-#             return 1
-#         if f2[1] <= f1[1]:
-#             return 2
-#     return 0
-#
-#
-# def find_better_idv_bosman_ver(alpha, f1, f2):
-#     """
-#     Kiem tra xem ca the nao tot hon theo paper cua Bosman.
-#     Ngau nhien 1 gia tri alpha, tinh lai fitness value cua tung individual theo alpha va so sanh.
-#     =========================================================================================================
-#
-#     Parameters:
-#     -----------
-#     :param alpha: value of alpha
-#     :param f1: the old fitness value of first individual
-#     :param f2: the old fitness value of first individual
-#     =========================================================================================================
-#
-#     Returns:
-#     :return:
-#     1: individual 1
-#     2: individual 2
-#     """
-#     f1_new = alpha * f1[0] + (1 - alpha) * f1[1]
-#     f2_new = alpha * f2[0] + (1 - alpha) * f2[1]
-#     if f1_new < f2_new:
-#         return 1
-#     return 2
-
-
-# def kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(p1, p2, p3):
-#     v_cp = p3 - p2
-#     dt = -v_cp[1] * (p1[0] - p2[0]) + v_cp[0] * (p1[1] - p2[1])
-#     if dt > 0:
-#         return 'tren'
-#     return 'duoi'
-
-
-# def cal_angle(p_middle, p_top, p_bot):
-#     x1 = p_top - p_middle
-#     x2 = p_bot - p_middle
-#     cosine_angle = (x1[0] * x2[0] + x1[1] * x2[1]) / (np.sqrt(np.sum(x1 ** 2)) * np.sqrt(np.sum(x2 ** 2)))
-#
-#     angle = np.arccos(cosine_angle)
-#     return 360 - np.degrees(angle)
-
-
-# def update_elitist_archive(new_idv_X_lst, new_idv_hashX_lst, new_idv_F_lst,
-#                            elitist_archive_X, elitist_archive_hashX, elitist_archive_F, first=False):
-#     if first:
-#         current_elitist_archive_X = elitist_archive_X.copy()
-#         current_elitist_archive_hashX = elitist_archive_hashX.copy()
-#         current_elitist_archive_F = elitist_archive_F.copy()
-#     else:
-#         current_elitist_archive_X = elitist_archive_X.copy().tolist()
-#         current_elitist_archive_hashX = elitist_archive_hashX.copy().tolist()
-#         current_elitist_archive_F = elitist_archive_F.copy().tolist()
-#
-#     rank = np.zeros(len(current_elitist_archive_X))
-#
-#     for i in range(len(new_idv_X_lst)):  # Duyet cac phan tu trong list can check
-#         if new_idv_hashX_lst[i] not in current_elitist_archive_hashX:
-#             flag = True  # Check xem co bi dominate khong?
-#             for j in range(len(current_elitist_archive_X)):  # Duyet cac phan tu trong elitist archive hien tai
-#                 better_idv = find_better_idv(new_idv_F_lst[i],
-#                                              current_elitist_archive_F[j])  # Kiem tra xem tot hon hay khong?
-#                 if better_idv == 1:
-#                     rank[j] += 1
-#                 elif better_idv == 2:
-#                     flag = False
-#                     break
-#             if flag:
-#                 current_elitist_archive_X.append(np.array(new_idv_X_lst[i]))
-#                 current_elitist_archive_hashX.append(np.array(new_idv_hashX_lst[i]))
-#                 current_elitist_archive_F.append(np.array(new_idv_F_lst[i]))
-#                 rank = np.append(rank, 0)
-#
-#     current_elitist_archive_X = np.array(current_elitist_archive_X)[rank == 0]
-#     current_elitist_archive_hashX = np.array(current_elitist_archive_hashX)[rank == 0]
-#     current_elitist_archive_F = np.array(current_elitist_archive_F)[rank == 0]
-#
-#     return current_elitist_archive_X, \
-#            current_elitist_archive_hashX, \
-#            current_elitist_archive_F
+def encode(X):
+    if isinstance(X, list):
+        X = np.array(X)
+    encode_X = np.where(X == 'I', 0, X)
+    encode_X = np.array(encode_X, dtype=np.int)
+    return encode_X
 
 
 class NSGANet(GeneticAlgorithm):
-    def __init__(self, benchmark, local_search_on_pf, local_search_on_knee, followed_bosman_paper, path, n_points=1,
+    def __init__(self,
+                 max_no_evaluations,
+                 crossover_type,
+                 surrogate_model_using,
+                 update_model_after_n_gens,
+                 path,
                  **kwargs):
         kwargs['individual'] = Individual(rank=np.inf, crowding=-1)
         super().__init__(**kwargs)
@@ -163,530 +64,841 @@ class NSGANet(GeneticAlgorithm):
         self.tournament_type = 'comp_by_dom_and_crowding'
         self.func_display_attrs = disp_multi_objective
 
-        self.local_search_on_pf = local_search_on_pf
-        self.local_search_on_knee = local_search_on_knee
-        self.n_points = n_points
-        self.followed_bosman_paper = followed_bosman_paper
-
+        ''' Custom '''
+        self.crossover_type = crossover_type
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
 
-        self.dpf = []
+        self.dpfs = []
         self.no_eval = []
 
+        self.max_no_evaluations = max_no_evaluations
+
+        self.surrogate_model_using = surrogate_model_using
+        self.update_model_after_n_gens = update_model_after_n_gens
+        self.surrogate_model = None
+        self.models_for_training = []
+
+        self.no_evaluations = 0
         self.path = path
 
-        self.benchmark_api = None
-        if benchmark == 'nas101':
-            self.pf_true = pickle.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
-            NASBENCH_TFRECORD = 'nasbench/nasbench_only108.tfrecord'
-            benchmark_api = api.NASBench_(NASBENCH_TFRECORD)
-            self.benchmark_api = benchmark_api
+    def true_evaluate(self, X, count_n_evaluations=True):
+        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+            if len(X.shape) == 1:
+                F = np.full(2, fill_value=np.nan)
 
-        elif benchmark == 'cifar10':
-            self.pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+                hashX = ''.join(X.tolist())
 
-        elif benchmark == 'cifar100':
-            self.pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
-        self.pf_true[:, 0], self.pf_true[:, 1] = self.pf_true[:, 1], self.pf_true[:, 0].copy()
+                F[0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
+                       / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
+                F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc'] / 100
 
-    # DONE
-    def _initialize(self):
-        pop = Population(n_individuals=0, individual=self.individual)
-        pop = self.sampling.sample(problem=self.problem, pop=pop, n_samples=self.pop_size, algorithm=self)
+                if count_n_evaluations:
+                    self.no_evaluations += 1
 
-        if self.survival:
-            pop = self.survival.do(self.problem, pop, self.pop_size, algorithm=self)
+            else:
+                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+                for i in range(X.shape[0]):
+                    hashX = ''.join(X[i].tolist())
 
-        ''' UPDATE ELITIST ARCHIVE AFTER INITIALIZE POPULATION '''
-        pop_X, pop_hashX, pop_F = pop.get('X'), pop.get('hashX'), pop.get('F')
+                    F[i][0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
+                              / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
+                    F[i][1] = 1 - BENCHMARK_DATA[hashX]['val_acc'] / 100
 
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-            update_elitist_archive(pop_X, pop_hashX, pop_F,
-                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
-                                   first=True)
-        print(pop.get('X'))
+                    if count_n_evaluations:
+                        self.no_evaluations += 1
+
+        else:
+            if len(X.shape) == 2:
+                F = np.full(2, fill_value=np.nan)
+
+                modelspec = api.ModelSpec(matrix=np.array(X[:-1], dtype=np.int), ops=X[-1].tolist())
+                hashX = BENCHMARK_API.get_module_hash(modelspec)
+
+                F[0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
+                        BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
+                F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
+
+                if count_n_evaluations:
+                    self.no_evaluations += 1
+
+            else:
+                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+
+                for i in range(X.shape[0]):
+                    modelspec = api.ModelSpec(matrix=np.array(X[i][:-1], dtype=np.int), ops=X[i][-1].tolist())
+                    hashX = BENCHMARK_API.get_module_hash(modelspec)
+
+                    F[i, 0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
+                            BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
+                    F[i, 1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
+
+                    if count_n_evaluations:
+                        self.no_evaluations += 1
+
+        return F
+
+    @staticmethod
+    def _fit_acc_predictor(inputs, targets):
+        acc_predictor = get_acc_predictor('mlp', inputs, targets)
+        return acc_predictor, acc_predictor.predict(inputs)
+
+    @staticmethod
+    def _sampling(n_samples):
+        pop = Population(n_samples)
+        pop_X, pop_hashX = [], []
+
+        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+            allowed_choices = ['I', '1', '2']
+
+            while len(pop_X) < n_samples:
+                new_X = np.random.choice(allowed_choices, 14)
+                new_hashX = ''.join(new_X.tolist())
+                if new_hashX not in pop_hashX:
+                    pop_X.append(new_X)
+                    pop_hashX.append(new_hashX)
+
+        pop.set('X', pop_X)
+        pop.set('hashX', pop_hashX)
+
         return pop
 
-    # DONE
-    def local_search_on_X(self, pop, X, n_points=2, ls_on_knee_solutions=False):
-        off_ = pop.new()
-        off_ = off_.merge(X)
+    @staticmethod
+    def _crossover(pop, type_crossover='UX'):
+        pop_X, pop_hashX = pop.get('X'), pop.get('hashX')
 
-        x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
+        offspring_X, offspring_hashX = [], []
 
-        non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
+        n_crossovers = 0
+        flag = False
 
-        # Using for local search on knee solutions
-        first, last = 0, 0
-        if ls_on_knee_solutions:
-            first, last = len(x_old_X) - 2, len(x_old_X) - 1
+        while len(offspring_X) < len(pop_X):
+            if n_crossovers > 100:
+                flag = True
 
-        if n_points == 1:
-            stop_iter = 30
+            idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
+            pop_X_ = pop.get('X')[idx]
 
-            for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
-                checked = [x_old_hashX[i]]
-                j = 0
+            if BENCHMARK_NAME == 'nas101':
+                for i in range(len(pop_X_)):
+                    if type_crossover == 'UX':
+                        offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        idx = np.random.randint(0, 14)
-                        ops = ['I', '1', '2']
-                        ops.remove(x_old_X[i][idx])
+                        crossover_pts = np.random.randint(0, 2, offspring1_X[-1].shape, dtype=np.bool)
+
+                        offspring1_X[-1][crossover_pts], offspring2_X[-1][crossover_pts] = \
+                            offspring2_X[-1][crossover_pts], offspring1_X[-1][crossover_pts].copy()
+
+                        module_spec1 = api.ModelSpec(matrix=np.array(offspring1_X[:-1], dtype=np.int),
+                                                     ops=offspring1_X[-1].tolist())
+                        module_spec2 = api.ModelSpec(matrix=np.array(offspring2_X[:-1], dtype=np.int),
+                                                     ops=offspring2_X[-1].tolist())
+
+                        offspring1_hashX = BENCHMARK_API.get_module_hash(module_spec1)
+                        offspring2_hashX = BENCHMARK_API.get_module_hash(module_spec2)
+
+                        offsprings_X = [offspring1_X, offspring2_X]
+                        checked_specs = [module_spec1, module_spec2]
+                        checked_hashX = [offspring1_hashX, offspring2_hashX]
+
+                        for j in range(2):
+                            if BENCHMARK_API.is_valid(checked_specs[j]):
+                                if not flag:
+                                    if (checked_hashX[j] not in offspring_hashX) and \
+                                            (checked_hashX[j] not in pop_hashX):
+                                        offspring_X.append(offsprings_X[j])
+                                        offspring_hashX.append(checked_hashX[j])
+                                else:
+                                    offspring_X.append(offsprings_X[j])
+                                    offspring_hashX.append(checked_hashX[j])
+                            else:
+                                print('invalid-crossover')
                     else:
-                        idx = np.random.randint(1, 6)
-                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
+                        # 2 points crossover
+                        parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
+                        parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
 
-                    x_new_X = x_old_X[i].copy()
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        x_new_X[idx] = new_op
+                        points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx] = new_op
-
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = self.benchmark_api.get_module_hash(module)
-
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        checked.append(x_new_hashX)
-                        j += 1
-                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                      check=True, algorithm=self)
-
-                        if i == first and ls_on_knee_solutions:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
-                        elif i == last and ls_on_knee_solutions:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
+                        low = points_crossover[0]
+                        if low > points_crossover[1]:
+                            high = low
+                            low = points_crossover[1]
                         else:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+                            high = points_crossover[1]
 
-                        if better_idv == 1:
-                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+                        parent1_matrix[low:high], parent2_matrix[low:high] = \
+                            parent2_matrix[low:high], parent1_matrix[low: high].copy()
+                        parent1_ops[low:high], parent2_ops[low:high] = \
+                            parent2_ops[low:high], parent1_ops[low:high].copy()
 
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
+                        idv_check = [[parent1_matrix, parent1_ops], [parent2_matrix, parent2_ops]]
+                        for idv in idv_check:
+                            spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
+                            if BENCHMARK_API.is_valid(spec):
+                                module_hash_spec = BENCHMARK_API.get_module_hash(spec)
+                                X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
 
-                        elif better_idv == 0:
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
+                                if not flag:
+                                    if (module_hash_spec not in offspring_hashX) and \
+                                            (module_hash_spec not in pop_hashX):
+                                        offspring_X.append(X)
+                                        offspring_hashX.append(module_hash_spec)
+                                else:
+                                    offspring_X.append(X)
+                                    offspring_hashX.append(module_hash_spec)
 
-        elif n_points == 2:
-            stop_iter = 30
+            elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                for i in range(len(pop_X_)):
+                    offspring1_X, offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
 
-            for i in range(len(x_old_X)):
+                    if type_crossover == '1X':
+                        crossover_pt = np.random.randint(1, len(offspring1_X))
 
-                max_n_searching = 100
-                n_searching = 0
-                checked = [x_old_hashX[i]]
-                j = 0
+                        offspring1_X[crossover_pt:], offspring2_X[crossover_pt:] = \
+                            offspring2_X[crossover_pt:], offspring1_X[crossover_pt:].copy()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        idx = np.random.choice(14, size=2, replace=False)
-                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
-                        ops1.remove(x_old_X[i][idx[0]])
-                        ops2.remove(x_old_X[i][idx[1]])
+                    elif type_crossover == 'UX':
+                        crossover_pts = np.random.randint(0, 2, offspring1_X.shape, dtype=np.bool)
+
+                        offspring1_X[crossover_pts], offspring2_X[crossover_pts] = \
+                            offspring2_X[crossover_pts], offspring1_X[crossover_pts].copy()
+
+                    offspring1_hashX = ''.join(offspring1_X.tolist())
+                    offspring2_hashX = ''.join(offspring2_X.tolist())
+
+                    if not flag:
+                        if (offspring1_hashX not in offspring_hashX) and (offspring1_hashX not in pop_hashX):
+                            offspring_X.append(offspring1_X)
+                            offspring_hashX.append(offspring1_hashX)
+
+                        if (offspring2_hashX not in offspring_hashX) and (offspring2_hashX not in pop_hashX):
+                            offspring_X.append(offspring2_X)
+                            offspring_hashX.append(offspring2_hashX)
                     else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
+                        offspring_X.append(offspring1_X)
+                        offspring_hashX.append(offspring1_hashX)
 
-                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+                        offspring_X.append(offspring2_X)
+                        offspring_hashX.append(offspring2_hashX)
 
-                    x_new_X = x_old_X[i].copy()
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
+            n_crossovers += 1
+        offspring_X = np.array(offspring_X)[:len(pop_X)]
+        offspring_hashX = np.array(offspring_hashX)[:len(pop_X)]
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+        if flag:
+            print('exist duplicate - crossover')
 
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+        ''' USING FOR CHECKING DUPLICATE '''
+        # if np.sum(np.unique(offspring_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
+        #     print('DUPLICATE')
+        #
+        # for hashX in offspring_hashX:
+        #     if hashX in pop_hashX:
+        #         print('DUPLICATE', hashX)
+        #         break
+        # -----------------------------------
+        offspring = Population(len(pop_X))
 
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        j += 1
-                        checked.append(x_new_hashX)
+        offspring.set('X', offspring_X)
+        offspring.set('hashX', offspring_hashX)
+        return offspring
 
-                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                      check=True, algorithm=self)
-                        if i == first and ls_on_knee_solutions:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
-                        elif i == last and ls_on_knee_solutions:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
-                        else:
-                            better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+    @staticmethod
+    def _mutation(pop, old_offsprings, prob_mutation=0.05):
+        pop_X = pop.get('X')
+        pop_hashX = pop.get('hashX')
 
-                        if better_idv == 1:
-                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+        new_offsprings = Population(len(old_offsprings))
 
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
+        new_offsprings_X = []
+        new_offsprings_hashX = []
 
-                        elif better_idv == 0:
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
+        old_offsprings_X = old_offsprings.get('X')
 
-        non_dominance_X = np.array(non_dominance_X)
-        non_dominance_hashX = np.array(non_dominance_hashX)
-        non_dominance_F = np.array(non_dominance_F)
+        while len(new_offsprings_X) < len(old_offsprings):
+            if BENCHMARK_NAME == 'nas101':
+                # mutation_pts = np.random.rand(pop_X.shape[0], 7)
+                #
+                # for i in range(len(pop_X)):
+                #     offspring_old_X = pop_X[i].copy()
+                #     for j in range(1, 6):
+                #         if mutation_pts[i][j] <= self.prob:
+                #             choices = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                #             choices.remove(offspring_old_X[-1][j])
+                #             offspring_old_X[-1][j] = np.random.choice(choices)
+                #
+                #     new_spec = api.ModelSpec(np.array(offspring_old_X[:-1], dtype=np.int), offspring_old_X[-1].tolist())
+                #
+                #     if benchmark_api.is_valid(new_spec):
+                #         module_hash_spec = benchmark_api.get_module_hash(new_spec)
+                #         if module_hash_spec in offspring_hashX:
+                #             print('duplicate offspring')
+                #         if module_hash_spec in pop_hashX:
+                #             print('duplicate pop')
+                #         if (module_hash_spec not in offspring_hashX) and \
+                #                 (module_hash_spec not in pop_hashX):
+                #             offspring_X.append(offspring_old_X)
+                #             offspring_hashX.append(module_hash_spec)
+                #     else:
+                #         print('invalid-mutation')
 
-        off_.set('X', x_old_X)
-        off_.set('hashX', x_old_hashX)
-        off_.set('F', x_old_F)
+                for x in pop_X:
+                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
+                    new_ops = copy.deepcopy(x[-1, :])
+                    # In expectation, V edges flipped (note that most end up being pruned).
+                    edge_mutation_prob = 1 / 7
+                    for src in range(0, 7 - 1):
+                        for dst in range(src + 1, 7):
+                            if np.random.rand() < edge_mutation_prob:
+                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
 
-        return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
+                    # In expectation, one op is resampled.
+                    op_mutation_prob = 1 / 5
+                    for ind in range(1, 7 - 1):
+                        if np.random.rand() < op_mutation_prob:
+                            available = [o for o in BENCHMARK_API.config['available_ops'] if o != new_ops[ind]]
+                            new_ops[ind] = np.random.choice(available)
+                    new_spec = api.ModelSpec(new_matrix, new_ops.tolist())
 
-    # DONE
-    def local_search_on_X_bosman(self, pop, X, n_points=2):
-        off_ = pop.new()
-        off_ = off_.merge(X)
+                    if BENCHMARK_API.is_valid(new_spec):
+                        module_hash_spec = BENCHMARK_API.get_module_hash(new_spec)
+                        if (module_hash_spec not in new_offsprings_hashX) and \
+                                (module_hash_spec not in pop_hashX):
+                            new_offsprings_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
+                            new_offsprings_hashX.append(module_hash_spec)
 
-        x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
+            elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                prob_mutation_idxs = np.random.rand(old_offsprings_X.shape[0], old_offsprings_X.shape[1])
 
-        non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
+                for i in range(len(old_offsprings_X)):
+                    tmp_new_offspring_X = old_offsprings_X[i].copy()
 
-        if n_points == 1:
-            stop_iter = 30
+                    for j in range(prob_mutation_idxs.shape[1]):
+                        if prob_mutation_idxs[i][j] <= prob_mutation:
+                            allowed_choices = ['I', '1', '2']
+                            allowed_choices.remove(tmp_new_offspring_X[j])
 
-            for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
-                checked = [x_old_hashX[i]]
-                j = 0
-                alpha = np.random.rand()
+                            tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        idx = np.random.randint(0, 14)
-                        ops = ['I', '1', '2']
-                        ops.remove(x_old_X[i][idx])
-                    else:
-                        idx = np.random.randint(1, 6)
-                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
+                    tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
 
-                    x_new_X = x_old_X[i].copy()
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        x_new_X[idx] = new_op
+                    if (tmp_new_offspring_hashX not in new_offsprings_hashX) and \
+                            (tmp_new_offspring_hashX not in pop_hashX):
+                        new_offsprings_X.append(tmp_new_offspring_X)
+                        new_offsprings_hashX.append(tmp_new_offspring_hashX)
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx] = new_op
+        new_offsprings.set('X', new_offsprings_X[:len(old_offsprings)])
+        new_offsprings.set('hashX', new_offsprings_hashX[:len(old_offsprings)])
 
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = self.benchmark_api.get_module_hash(module)
+        # USING FOR CHECKING DUPLICATE
+        if np.sum(np.unique(new_offsprings_hashX, return_counts=True)[-1]) != pop_X.shape[0]:
+            print('DUPLICATE')
 
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        checked.append(x_new_hashX)
+        for hashX in new_offsprings_hashX:
+            if hashX in pop_hashX:
+                print('DUPLICATE', hashX)
+                break
+        # -----------------------------------
+        return new_offsprings
 
-                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                      check=True, algorithm=self)
-                        better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
+    def _initialize_custom(self):
+        if self.surrogate_model_using:
+            # Khoi tao 1 so luong kien truc mang de train surrogate model
+            models_sampling = self._sampling(500)
+            models_sampling_F = self.true_evaluate(models_sampling.get('X'))
+            models_sampling.set('F', models_sampling_F)
 
-                        if better_idv == 0:  # Non-dominated solution
-                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+            self.surrogate_model, _ = self._fit_acc_predictor(inputs=encode(models_sampling.get('X')),
+                                                              targets=models_sampling_F[:, 1])
+            print('-> initialize surrogate model - done')
+            pop = models_sampling[:self.pop_size]
+        else:
+            pop = self._sampling(self.pop_size)
+            pop_F = self.true_evaluate(X=pop.get('X'))
+            pop.set('F', pop_F)
 
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
+        pop = self.survival.do(pop, self.pop_size)
 
-                        else:
-                            better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
-                            if better_idv_ == 1:  # Improved solution
-                                x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+        return pop
 
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(x_new_hashX)
-                                non_dominance_F.append(x_new_F[0])
-                        j += 1
+    # # DONE
+    # def local_search_on_X(self, pop, X, n_points=2, ls_on_knee_solutions=False):
+    #     off_ = pop.new()
+    #     off_ = off_.merge(X)
+    #
+    #     x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
+    #
+    #     non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
+    #
+    #     # Using for local search on knee solutions
+    #     first, last = 0, 0
+    #     if ls_on_knee_solutions:
+    #         first, last = len(x_old_X) - 2, len(x_old_X) - 1
+    #
+    #     if n_points == 1:
+    #         stop_iter = 30
+    #
+    #         for i in range(len(x_old_X)):
+    #             max_n_searching = 100
+    #             n_searching = 0
+    #             checked = [x_old_hashX[i]]
+    #             j = 0
+    #
+    #             while (j < stop_iter) and (n_searching < max_n_searching):
+    #                 n_searching += 1
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     idx = np.random.randint(0, 14)
+    #                     ops = ['I', '1', '2']
+    #                     ops.remove(x_old_X[i][idx])
+    #                 else:
+    #                     idx = np.random.randint(1, 6)
+    #                     ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops.remove(x_old_X[i][-1][idx])
+    #                 new_op = np.random.choice(ops)
+    #
+    #                 x_new_X = x_old_X[i].copy()
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     x_new_X[idx] = new_op
+    #
+    #                     x_new_hashX = ''.join(x_new_X.tolist())
+    #                 else:
+    #                     x_new_X[-1][idx] = new_op
+    #
+    #                     module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+    #                                        ops=x_new_X[-1].tolist())
+    #                     x_new_hashX = self.benchmark_api.get_module_hash(module)
+    #
+    #                 if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+    #                     checked.append(x_new_hashX)
+    #                     j += 1
+    #                     x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+    #                                                   check=True, algorithm=self)
+    #
+    #                     if i == first and ls_on_knee_solutions:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
+    #                     elif i == last and ls_on_knee_solutions:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
+    #                     else:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+    #
+    #                     if better_idv == 1:
+    #                         x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #                     elif better_idv == 0:
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #     elif n_points == 2:
+    #         stop_iter = 30
+    #
+    #         for i in range(len(x_old_X)):
+    #
+    #             max_n_searching = 100
+    #             n_searching = 0
+    #             checked = [x_old_hashX[i]]
+    #             j = 0
+    #
+    #             while (j < stop_iter) and (n_searching < max_n_searching):
+    #                 n_searching += 1
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     idx = np.random.choice(14, size=2, replace=False)
+    #                     ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+    #                     ops1.remove(x_old_X[i][idx[0]])
+    #                     ops2.remove(x_old_X[i][idx[1]])
+    #                 else:
+    #                     idx = np.random.choice(range(1, 6), size=2, replace=False)
+    #                     ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops1.remove(x_old_X[i][-1][idx[0]])
+    #                     ops2.remove(x_old_X[i][-1][idx[1]])
+    #
+    #                 new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+    #
+    #                 x_new_X = x_old_X[i].copy()
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
+    #
+    #                     x_new_hashX = ''.join(x_new_X.tolist())
+    #                 else:
+    #                     x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+    #
+    #                     module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+    #                                        ops=x_new_X[-1].tolist())
+    #                     x_new_hashX = self.benchmark_api.get_module_hash(module)
+    #
+    #                 if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+    #                     j += 1
+    #                     checked.append(x_new_hashX)
+    #
+    #                     x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+    #                                                   check=True, algorithm=self)
+    #                     if i == first and ls_on_knee_solutions:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'first')
+    #                     elif i == last and ls_on_knee_solutions:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i], 'last')
+    #                     else:
+    #                         better_idv = find_better_idv(x_new_F[0], x_old_F[i])
+    #
+    #                     if better_idv == 1:
+    #                         x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #                     elif better_idv == 0:
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #     non_dominance_X = np.array(non_dominance_X)
+    #     non_dominance_hashX = np.array(non_dominance_hashX)
+    #     non_dominance_F = np.array(non_dominance_F)
+    #
+    #     off_.set('X', x_old_X)
+    #     off_.set('hashX', x_old_hashX)
+    #     off_.set('F', x_old_F)
+    #
+    #     return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
+    #
+    # # DONE
+    # def local_search_on_X_bosman(self, pop, X, n_points=2):
+    #     off_ = pop.new()
+    #     off_ = off_.merge(X)
+    #
+    #     x_old_X, x_old_hashX, x_old_F = off_.get('X'), off_.get('hashX'), off_.get('F')
+    #
+    #     non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
+    #
+    #     if n_points == 1:
+    #         stop_iter = 30
+    #
+    #         for i in range(len(x_old_X)):
+    #             max_n_searching = 100
+    #             n_searching = 0
+    #             checked = [x_old_hashX[i]]
+    #             j = 0
+    #             alpha = np.random.rand()
+    #
+    #             while (j < stop_iter) and (n_searching < max_n_searching):
+    #                 n_searching += 1
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     idx = np.random.randint(0, 14)
+    #                     ops = ['I', '1', '2']
+    #                     ops.remove(x_old_X[i][idx])
+    #                 else:
+    #                     idx = np.random.randint(1, 6)
+    #                     ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops.remove(x_old_X[i][-1][idx])
+    #                 new_op = np.random.choice(ops)
+    #
+    #                 x_new_X = x_old_X[i].copy()
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     x_new_X[idx] = new_op
+    #
+    #                     x_new_hashX = ''.join(x_new_X.tolist())
+    #                 else:
+    #                     x_new_X[-1][idx] = new_op
+    #
+    #                     module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+    #                                        ops=x_new_X[-1].tolist())
+    #                     x_new_hashX = BENCHMARK_API.get_module_hash(module)
+    #
+    #                 if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+    #                     checked.append(x_new_hashX)
+    #
+    #                     x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+    #                                                   check=True, algorithm=self)
+    #                     better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
+    #
+    #                     if better_idv == 0:  # Non-dominated solution
+    #                         x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #                     else:
+    #                         better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
+    #                         if better_idv_ == 1:  # Improved solution
+    #                             x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                             non_dominance_X.append(x_new_X)
+    #                             non_dominance_hashX.append(x_new_hashX)
+    #                             non_dominance_F.append(x_new_F[0])
+    #                     j += 1
+    #
+    #     elif n_points == 2:
+    #         stop_iter = 30
+    #
+    #         for i in range(len(x_old_X)):
+    #             max_n_searching = 100
+    #             n_searching = 0
+    #             checked = [x_old_hashX[i]]
+    #             j = 0
+    #             alpha = np.random.rand()
+    #
+    #             while (j < stop_iter) and (n_searching < max_n_searching):
+    #                 n_searching += 1
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     idx = np.random.choice(14, size=2, replace=False)
+    #                     ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+    #                     ops1.remove(x_old_X[i][idx[0]])
+    #                     ops2.remove(x_old_X[i][idx[1]])
+    #                 else:
+    #                     idx = np.random.choice(range(1, 6), size=2, replace=False)
+    #                     ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+    #                     ops1.remove(x_old_X[i][-1][idx[0]])
+    #                     ops2.remove(x_old_X[i][-1][idx[1]])
+    #
+    #                 new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+    #
+    #                 x_new_X = x_old_X[i].copy()
+    #                 if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
+    #                     x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
+    #
+    #                     x_new_hashX = ''.join(x_new_X.tolist())
+    #                 else:
+    #                     x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+    #
+    #                     module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
+    #                                        ops=x_new_X[-1].tolist())
+    #                     x_new_hashX = self.benchmark_api.get_module_hash(module)
+    #
+    #                 if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+    #                     checked.append(x_new_hashX)
+    #
+    #                     x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
+    #                                                   check=True, algorithm=self)
+    #
+    #                     better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
+    #
+    #                     if better_idv == 0:  # Non-dominated solution
+    #                         x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                         non_dominance_X.append(x_new_X)
+    #                         non_dominance_hashX.append(x_new_hashX)
+    #                         non_dominance_F.append(x_new_F[0])
+    #
+    #                     else:
+    #                         better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
+    #                         if better_idv_ == 1:  # Improved solution
+    #                             x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
+    #
+    #                             non_dominance_X.append(x_new_X)
+    #                             non_dominance_hashX.append(x_new_hashX)
+    #                             non_dominance_F.append(x_new_F[0])
+    #                     j += 1
+    #
+    #     non_dominance_X = np.array(non_dominance_X)
+    #     non_dominance_hashX = np.array(non_dominance_hashX)
+    #     non_dominance_F = np.array(non_dominance_F)
+    #
+    #     off_.set('X', x_old_X)
+    #     off_.set('hashX', x_old_hashX)
+    #     off_.set('F', x_old_F)
+    #
+    #     return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
-        elif n_points == 2:
-            stop_iter = 30
-
-            for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
-                checked = [x_old_hashX[i]]
-                j = 0
-                alpha = np.random.rand()
-
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        idx = np.random.choice(14, size=2, replace=False)
-                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
-                        ops1.remove(x_old_X[i][idx[0]])
-                        ops2.remove(x_old_X[i][idx[1]])
-                    else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
-
-                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
-
-                    x_new_X = x_old_X[i].copy()
-                    if self.problem.problem_name == 'cifar10' or self.problem.problem_name == 'cifar100':
-                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
-
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
-
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = self.benchmark_api.get_module_hash(module)
-
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        checked.append(x_new_hashX)
-
-                        x_new_F = self.evaluator.eval(self.problem, np.array([x_new_X]),
-                                                      check=True, algorithm=self)
-
-                        better_idv = find_better_idv(f1=x_new_F[0], f2=x_old_F[i])
-
-                        if better_idv == 0:  # Non-dominated solution
-                            x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
-
-                            non_dominance_X.append(x_new_X)
-                            non_dominance_hashX.append(x_new_hashX)
-                            non_dominance_F.append(x_new_F[0])
-
-                        else:
-                            better_idv_ = find_better_idv_bosman_ver(alpha=alpha, f1=x_new_F[0], f2=x_old_F[i])
-                            if better_idv_ == 1:  # Improved solution
-                                x_old_X[i], x_old_hashX[i], x_old_F[i] = x_new_X, x_new_hashX, x_new_F[0]
-
-                                non_dominance_X.append(x_new_X)
-                                non_dominance_hashX.append(x_new_hashX)
-                                non_dominance_F.append(x_new_F[0])
-                        j += 1
-
-        non_dominance_X = np.array(non_dominance_X)
-        non_dominance_hashX = np.array(non_dominance_hashX)
-        non_dominance_F = np.array(non_dominance_F)
-
-        off_.set('X', x_old_X)
-        off_.set('hashX', x_old_hashX)
-        off_.set('F', x_old_F)
-
-        return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
-
-    # DONE
     def _next(self, pop):
-        self.off = self._mating(pop)
+        offsprings = self._mating(pop)
 
         # merge the offsprings with the current population
-        pop = pop.merge(self.off)
+        pop = pop.merge(offsprings)
 
         # the do survival selection
-        pop = self.survival.do(self.problem, pop, self.pop_size, algorithm=self)
+        pop = self.survival.do(pop, self.pop_size)
 
-        ''' Local Search on PF '''
-        if self.local_search_on_pf == 1:
-            pop_F = pop.get('F')
-
-            front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
-
-            pareto_front = pop[front_0].copy()
-
-            if self.followed_bosman_paper == 1:
-                pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X_bosman(pop, X=pareto_front, n_points=self.n_points)
-            else:
-                pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X(pop, X=pareto_front, n_points=self.n_points)
-            pop[front_0] = pareto_front
-
-            ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-                update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-        ''' Local Search on Knee Solutions '''
-        if self.local_search_on_knee == 1:
-            pop_F = pop.get('F')
-
-            front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
-
-            pareto_front = pop[front_0].copy()
-            f_pareto_front = pop_F[front_0].copy()
-
-            # Normalize val_error for calculating angle between two individuals
-            f_pareto_front_normalize = pop_F[front_0].copy()
-
-            min_f1 = np.min(f_pareto_front[:, 1])
-            max_f1 = np.max(f_pareto_front[:, 1])
-            f_pareto_front_normalize[:, 1] = (f_pareto_front[:, 1] - min_f1) / (max_f1 - min_f1)
-
-            new_idx = np.argsort(f_pareto_front[:, 0])
-
-            pareto_front = pareto_front[new_idx]
-            f_pareto_front = f_pareto_front[new_idx]
-            f_pareto_front_normalize = f_pareto_front_normalize[new_idx]
-            front_0 = front_0[new_idx]
-
-            angle = [np.array([360, 0])]
-            for i in range(1, len(f_pareto_front) - 1):
-                if (np.sum(f_pareto_front[i - 1] - f_pareto_front[i]) == 0) or (
-                        np.sum(f_pareto_front[i] - f_pareto_front[i + 1]) == 0):
-                    angle.append(np.array([0, i]))
-                else:
-                    tren_hay_duoi = kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(f_pareto_front[i], f_pareto_front[i - 1],
-                                                                             f_pareto_front[i + 1])
-                    if tren_hay_duoi == 'duoi':
-                        angle.append(
-                            np.array(
-                                [cal_angle(p_middle=f_pareto_front_normalize[i], p_top=f_pareto_front_normalize[i - 1],
-                                           p_bot=f_pareto_front_normalize[i + 1]), i]))
-                    else:
-                        angle.append(np.array([0, i]))
-
-            angle.append(np.array([360, len(pareto_front) - 1]))
-            angle = np.array(angle)
-            angle = angle[np.argsort(angle[:, 0])]
-
-            angle = angle[angle[:, 0] > 210]
-
-            idx_knee_solutions = np.array(angle[:, 1], dtype=np.int)
-            knee_solutions = pareto_front[idx_knee_solutions].copy()
-
-            # f_knee_solutions = f_pareto_front[idx_knee_solutions]
-            # plt.scatter(f_pareto_front[:, 0], f_pareto_front[:, 1], s=30, edgecolors='blue',
-            #             facecolors='none', label='True PF')
-            # plt.scatter(f_knee_solutions[:, 0], f_knee_solutions[:, 1], c='red', s=15,
-            #             label='Knee Solutions')
-
-            if self.followed_bosman_paper == 1:
-                knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X_bosman(pop, X=knee_solutions, n_points=self.n_points)
-            else:
-                knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
-                    self.local_search_on_X(pop, X=knee_solutions, n_points=self.n_points, ls_on_knee_solutions=True)
-
-            ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-                update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-            pareto_front[idx_knee_solutions] = knee_solutions
-
-            pop[front_0] = pareto_front
+        # ''' Local Search on PF '''
+        # if self.local_search_on_pf == 1:
+        #     pop_F = pop.get('F')
+        #
+        #     front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
+        #
+        #     pareto_front = pop[front_0].copy()
+        #
+        #     if self.followed_bosman_paper == 1:
+        #         pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+        #             self.local_search_on_X_bosman(pop, X=pareto_front, n_points=self.n_points)
+        #     else:
+        #         pareto_front, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+        #             self.local_search_on_X(pop, X=pareto_front, n_points=self.n_points)
+        #     pop[front_0] = pareto_front
+        #
+        #     ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
+        #     self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+        #         update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
+        #                                self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+        #
+        # ''' Local Search on Knee Solutions '''
+        # if self.local_search_on_knee == 1:
+        #     pop_F = pop.get('F')
+        #
+        #     front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
+        #
+        #     pareto_front = pop[front_0].copy()
+        #     f_pareto_front = pop_F[front_0].copy()
+        #
+        #     # Normalize val_error for calculating angle between two individuals
+        #     f_pareto_front_normalize = pop_F[front_0].copy()
+        #
+        #     min_f1 = np.min(f_pareto_front[:, 1])
+        #     max_f1 = np.max(f_pareto_front[:, 1])
+        #     f_pareto_front_normalize[:, 1] = (f_pareto_front[:, 1] - min_f1) / (max_f1 - min_f1)
+        #
+        #     new_idx = np.argsort(f_pareto_front[:, 0])
+        #
+        #     pareto_front = pareto_front[new_idx]
+        #     f_pareto_front = f_pareto_front[new_idx]
+        #     f_pareto_front_normalize = f_pareto_front_normalize[new_idx]
+        #     front_0 = front_0[new_idx]
+        #
+        #     angle = [np.array([360, 0])]
+        #     for i in range(1, len(f_pareto_front) - 1):
+        #         if (np.sum(f_pareto_front[i - 1] - f_pareto_front[i]) == 0) or (
+        #                 np.sum(f_pareto_front[i] - f_pareto_front[i + 1]) == 0):
+        #             angle.append(np.array([0, i]))
+        #         else:
+        #             tren_hay_duoi = kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3(f_pareto_front[i], f_pareto_front[i - 1],
+        #                                                                      f_pareto_front[i + 1])
+        #             if tren_hay_duoi == 'duoi':
+        #                 angle.append(
+        #                     np.array(
+        #                         [cal_angle(p_middle=f_pareto_front_normalize[i], p_top=f_pareto_front_normalize[i - 1],
+        #                                    p_bot=f_pareto_front_normalize[i + 1]), i]))
+        #             else:
+        #                 angle.append(np.array([0, i]))
+        #
+        #     angle.append(np.array([360, len(pareto_front) - 1]))
+        #     angle = np.array(angle)
+        #     angle = angle[np.argsort(angle[:, 0])]
+        #
+        #     angle = angle[angle[:, 0] > 210]
+        #
+        #     idx_knee_solutions = np.array(angle[:, 1], dtype=np.int)
+        #     knee_solutions = pareto_front[idx_knee_solutions].copy()
+        #
+        #     # f_knee_solutions = f_pareto_front[idx_knee_solutions]
+        #     # plt.scatter(f_pareto_front[:, 0], f_pareto_front[:, 1], s=30, edgecolors='blue',
+        #     #             facecolors='none', label='True PF')
+        #     # plt.scatter(f_knee_solutions[:, 0], f_knee_solutions[:, 1], c='red', s=15,
+        #     #             label='Knee Solutions')
+        #
+        #     if self.followed_bosman_paper == 1:
+        #         knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+        #             self.local_search_on_X_bosman(pop, X=knee_solutions, n_points=self.n_points)
+        #     else:
+        #         knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
+        #             self.local_search_on_X(pop, X=knee_solutions, n_points=self.n_points, ls_on_knee_solutions=True)
+        #
+        #     ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
+        #     self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+        #         update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
+        #                                self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+        #
+        #     pareto_front[idx_knee_solutions] = knee_solutions
+        #
+        #     pop[front_0] = pareto_front
 
         return pop
 
     # DONE
     def _mating(self, pop):
         # CROSSOVER
-        off = self.crossover.do(problem=self.problem, pop=pop, algorithm=self)
+        offsprings = self._crossover(pop=pop, type_crossover=self.crossover_type)
         # print('crossover-done')
 
-        # EVALUATE OFFSPRINGS AFTER CROSSOVER
-        off_F = self.evaluator.eval(self.problem, off.get('X'), check=True, algorithm=self)
-        off.set('F', off_F)
+        ''' evaluate offsprings - crossover '''
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings.set('F', offsprings_true_F)
 
-        # UPDATE ELITIST ARCHIVE AFTER CROSSOVER
-        off_X = off.get('X')
-        off_hashX = off.get('hashX')
-        off_F = off.get('F')
+        ''' update elitist archive - crossover '''
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-            update_elitist_archive(off_X, off_hashX, off_F,
+            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
         # MUTATION
-        off = self.mutation.do(self.problem, off, algorithm=self)
+        offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
         # print('mutation-done')
 
-        # EVALUATE OFFSPRINGS AFTER MUTATION
-        off_F = self.evaluator.eval(self.problem, off.get('X'), check=True, algorithm=self)
-        off.set('F', off_F)
+        ''' evaluate offsprings - mutation '''
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings.set('F', offsprings_true_F)
 
-        # UPDATE ELITIST ARCHIVE AFTER MUTATION
-        off_X = off.get('X')
-        off_hashX = off.get('hashX')
-        off_F = off.get('F')
+        ''' update elitist archive - mutation '''
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-            update_elitist_archive(off_X, off_hashX, off_F,
+            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
 
-        CV = np.zeros((len(off), 1))
-        feasible = np.ones((len(off), 1), dtype=np.bool)
-
-        off.set('CV', CV)
-        off.set('feasible', feasible)
-        return off
+        return offsprings
 
     # DONE
-    def _solve(self, problem, termination):
-        self.n_gen = 0
+    def solve_custom(self):
+        self.n_gen = 1
 
-        ''' INITIALIZE '''
-        self.pop = self._initialize()
-        print('--> Initialize - Done')
+        ''' initialize '''
+        self.pop = self._initialize_custom()
+        print('-> initialize population - done')
 
-        ''' CALCULATE DPFS EACH GEN - USING FOR VISUALIZE'''
-        dpfs = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
-        self.dpf.append(dpfs)
-        self.no_eval.append(self.problem._n_evaluated)
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+            update_elitist_archive(self.pop.get('X'), self.pop.get('hashX'), self.pop.get('F'),
+                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
+                                   first=True)
 
-        self._each_iteration(self, first=True)
+        self._do_each_gen()
 
-        # while termination criteria not fulfilled
-        while termination.do_continue(self):
+        while self.no_evaluations < self.max_no_evaluations:
             self.n_gen += 1
 
             self.pop = self._next(self.pop)
 
-            ''' CALCULATE DPFS EACH GEN - USING FOR VISUALIZE'''
-            dpf = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=self.pf_true), 5)
-            self.dpf.append(dpf)
-            self.no_eval.append(self.problem._n_evaluated)
-
-            self._each_iteration(self)
+            self._do_each_gen()
 
         self._finalize()
 
-        return self.pop
+        return
+
+    def _do_each_gen(self):
+        print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
+
+        pf = self.elitist_archive_F
+        pf = pf[np.argsort(pf[:, 0])]
+        pk.dump([pf, self.no_evaluations], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+
+        dpfs = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=BENCHMARK_PF_TRUE), 5)
+        if len(self.no_eval) == 0:
+            self.dpfs.append(dpfs)
+            self.no_eval.append(self.no_evaluations)
+        else:
+            if self.no_evaluations == self.no_eval[-1]:
+                self.dpfs[-1] = dpfs
+            else:
+                self.dpfs.append(dpfs)
+                self.no_eval.append(self.no_evaluations)
 
     # DONE
     def _finalize(self):
-        plt.scatter(self.pf_true[:, 0], self.pf_true[:, 1], facecolors='none', edgecolors='blue', s=30, label='True PF')
-        plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=10, label='Elitist Archive')
-        if self.problem.problem_name == 'nas101':
-            plt.xlabel('Params (normalize)')
-        else:
-            plt.xlabel('MMACs (normalize)')
-        plt.ylabel('Validation Error')
-        plt.legend()
-        plt.savefig(f'{self.path}/final_pf')
-        plt.clf()
-
-        pickle.dump([self.no_eval, self.dpf], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
-        plt.plot(self.no_eval, self.dpf)
+        pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
+        plt.plot(self.no_eval, self.dpfs)
         plt.xlabel('No.Evaluations')
         plt.ylabel('DPFS')
         plt.grid()
         plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
+        plt.clf()
+
+        plt.scatter(BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1], facecolors='none', edgecolors='blue', s=40,
+                    label='true pf')
+        plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15, label='elitist archive')
+        plt.xlabel('MMACs (normalize)')
+        plt.ylabel('validation error')
+        plt.legend()
+        plt.grid()
+        plt.savefig(f'{self.path}/final_pf')
         plt.clf()
 
 
@@ -703,30 +915,24 @@ def binary_tournament(pop, P, algorithm):
     for i in range(P.shape[0]):
 
         a, b = P[i, 0], P[i, 1]
-        # if at least one solution is infeasible
-        if pop[a].CV > 0.0 or pop[b].CV > 0.0:
-            S[i] = compare(a, pop[a].CV, b, pop[b].CV, method='smaller_is_better', return_random_if_equal=True)
 
-        # both solutions are feasible
+        if tournament_type == 'comp_by_dom_and_crowding':
+            rel = Dominator.get_relation(pop[a].F, pop[b].F)
+            if rel == 1:
+                S[i] = a
+            elif rel == -1:
+                S[i] = b
+
+        elif tournament_type == 'comp_by_rank_and_crowding':
+            S[i] = compare(a, pop[a].rank, b, pop[b].rank,
+                           method='smaller_is_better')
+
         else:
-            if tournament_type == 'comp_by_dom_and_crowding':
-                rel = Dominator.get_relation(pop[a].F, pop[b].F)
-                if rel == 1:
-                    S[i] = a
-                elif rel == -1:
-                    S[i] = b
+            raise Exception("Unknown tournament type.")
 
-            elif tournament_type == 'comp_by_rank_and_crowding':
-                S[i] = compare(a, pop[a].rank, b, pop[b].rank,
-                               method='smaller_is_better')
-
-            else:
-                raise Exception("Unknown tournament type.")
-
-            # if rank or domination relation didn't make a decision compare by crowding
-            if np.isnan(S[i]):
-                S[i] = compare(a, pop[a].get("crowding"), b, pop[b].get("crowding"),
-                               method='larger_is_better', return_random_if_equal=True)
+        if np.isnan(S[i]):
+            S[i] = compare(a, pop[a].get("crowding"), b, pop[b].get("crowding"),
+                           method='larger_is_better', return_random_if_equal=True)
     return S[:, None].astype(np.int)
 
 
@@ -735,14 +941,12 @@ def binary_tournament(pop, P, algorithm):
 # ---------------------------------------------------------------------------------------------------------
 
 
-class RankAndCrowdingSurvival(Survival):
+class RankAndCrowdingSurvival:
 
-    def __init__(self) -> None:
-        super().__init__(True)
-
-    def _do(self, pop, n_survive, D=None, **kwargs):
+    @staticmethod
+    def do(pop, n_survive):
         # get the objective space values and objects
-        F = pop.get("F")
+        F = pop.get('F')
 
         # the final indices of surviving individuals
         survivors = []
@@ -757,8 +961,8 @@ class RankAndCrowdingSurvival(Survival):
 
             # save rank and crowding in the individual class
             for j, i in enumerate(front):
-                pop[i].set("rank", k)
-                pop[i].set("crowding", crowding_of_front[j])
+                pop[i].set('rank', k)
+                pop[i].set('crowding', crowding_of_front[j])
 
             # current front sorted by crowding distance if splitting
             if len(survivors) + len(front) > n_survive:
@@ -878,3 +1082,121 @@ def nsganet(
 
 
 parse_doc_string(nsganet)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('NSGAII for NAS')
+
+    # hyper-parameters for problem
+    parser.add_argument('--benchmark_name', type=str, default='cifar10',
+                        help='the benchmark used for optimizing')
+    parser.add_argument('--max_no_evaluations', type=int, default=10000)
+
+    # hyper-parameters for main
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
+    parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
+
+    # hyper-parameters for algorithm (NSGAII)
+    parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
+    parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
+    parser.add_argument('--crossover_type', type=str, default='UX')
+    parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
+    parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
+    parser.add_argument('--local_search_on_n_points', type=int, default=1)
+    parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
+    parser.add_argument('--using_surrogate_model', type=int, default=0)
+    parser.add_argument('--update_model_after_n_gens', type=int, default=10)
+    args = parser.parse_args()
+
+    BENCHMARK_NAME = args.benchmark_name
+    BENCHMARK_DATA = None
+    BENCHMARK_MIN_MAX = None
+    BENCHMARK_PF_TRUE = None
+
+    if BENCHMARK_NAME == 'nas101':
+        nasbench_tfrecord = 'nasbench/nasbench_only108.tfrecord'
+        BENCHMARK_API = api.NASBench_(nasbench_tfrecord)
+        BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+
+    elif BENCHMARK_NAME == 'cifar10':
+        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+
+    elif BENCHMARK_NAME == 'cifar100':
+        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+
+    BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
+    print('--> Load benchmark - Done')
+
+    MAX_NO_EVALUATIONS = args.max_no_evaluations
+
+    ALGORITHM_NAME = args.algorithm_name
+
+    POP_SIZE = args.pop_size
+
+    CROSSOVER_TYPE = args.crossover_type
+
+    LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
+    LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
+    LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
+    LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
+
+    USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
+    UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
+
+    NUMBER_OF_RUNS = args.number_of_runs
+    SEED = args.seed
+
+    now = datetime.now()
+    dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_'
+                            f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
+                            f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
+                            f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
+                            f'%d_%m_%H_%M')
+    root_path = dir_name
+
+    # Create root folder
+    os.mkdir(root_path)
+    print(f'--> Create folder {root_path} - Done\n')
+
+    for i_run in range(NUMBER_OF_RUNS):
+        seed = SEED + i_run * 100
+        np.random.seed(seed)
+        torch.random.manual_seed(seed)
+
+        sub_path = root_path + f'/{i_run}'
+
+        # Create new folder (i_run) in root folder
+        os.mkdir(sub_path)
+        print(f'--> Create folder {sub_path} - Done')
+
+        # Create new folder (pf_eval) in 'i_run' folder
+        os.mkdir(sub_path + '/pf_eval')
+        print(f'--> Create folder {sub_path}/pf_eval - Done')
+
+        # Create new folder (visualize_pf_each_gen) in 'i_run' folder
+        os.mkdir(sub_path + '/visualize_pf_each_gen')
+        print(f'--> Create folder {sub_path}/visualize_pf_each_gen - Done\n')
+
+        net = NSGANet(
+            max_no_evaluations=MAX_NO_EVALUATIONS,
+            pop_size=POP_SIZE,
+            selection=TournamentSelection(func_comp=binary_tournament),
+            survival=RankAndCrowdingSurvival(),
+            crossover_type=CROSSOVER_TYPE,
+            surrogate_model_using=USING_SURROGATE_MODEL,
+            update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+            path=sub_path)
+
+        start = timeit.default_timer()
+        net.solve_custom()
+        end = timeit.default_timer()
+
+        print(f'--> The number of runs: {i_run + 1}/{NUMBER_OF_RUNS}')
+        print(f'--> Took {end - start} seconds\n')
+
+    print(f'All {NUMBER_OF_RUNS} runs - Done')
