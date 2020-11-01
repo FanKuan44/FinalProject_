@@ -1,4 +1,5 @@
 import argparse
+import copy
 import os
 import pickle as pk
 import timeit
@@ -18,11 +19,13 @@ from pymoo.rand import random
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
 from pymoo.util.display import disp_multi_objective
 from pymoo.util.reference_direction import UniformReferenceDirectionFactory
-from scipy.spatial.distance import cdist
 
+from scipy.spatial.distance import cdist
 from acc_predictor.factory import get_acc_predictor
+
 from nasbench import wrap_api as api
 from nasbench.lib import model_spec
+
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.util.compare import find_better_idv, find_better_idv_bosman_ver
 from wrap_pymoo.util.dpfs_calculating import cal_dpfs
@@ -32,7 +35,7 @@ from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_
 ModelSpec = model_spec.ModelSpec
 
 # =========================================================================================================
-# Implementation
+# Implementation based on moead from https://github.com/msu-coinlab/pymoo
 # =========================================================================================================
 
 
@@ -47,6 +50,7 @@ def encode(X):
 class MOEADNET(GeneticAlgorithm):
     def __init__(self,
                  max_no_evaluations,
+                 crossover_type,
                  using_surrogate_model,
                  update_model_after_n_gens,
                  path,
@@ -82,9 +86,9 @@ class MOEADNET(GeneticAlgorithm):
         self.neighbors = np.argsort(cdist(self.ref_dirs, self.ref_dirs), axis=1, kind='quicksort')[:, :self.n_neighbors]
 
         ''' customize '''
-        self.elitist_archive_X = []
-        self.elitist_archive_hashX = []
-        self.elitist_archive_F = []
+        self.crossover_type = crossover_type
+
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
 
         self.dpfs = []
         self.no_eval = []
@@ -224,63 +228,78 @@ class MOEADNET(GeneticAlgorithm):
 
         return pop
 
-    def _initialize_custom(self):
-        self._decomposition = Tchebicheff()
-
-        if self.using_surrogate_model:
-            # Khoi tao 1 so luong kien truc mang de train surrogate model
-            models_sampling = self._sampling(500)
-            models_sampling_F = self.true_evaluate(models_sampling.get('X'))
-            models_sampling.set('F', models_sampling_F)
-
-            self.surrogate_model, _ = self._fit_acc_predictor(inputs=encode(models_sampling.get('X')),
-                                                              targets=models_sampling_F[:, 1])
-            print('-> initialize surrogate model - done')
-            idxs = random.perm(500)
-            pop = models_sampling[idxs[:self.pop_size]]
-        else:
-            pop = self._sampling(self.pop_size)
-            pop_F = self.true_evaluate(X=pop.get('X'))
-            pop.set('F', pop_F)
-
-        self.ideal_point = np.min(pop.get('F'), axis=0)
-
-        return pop
-
     @staticmethod
-    def _crossover(pop, parents_idx):
-        pop_hashX = pop.get('hashX')
-
+    def _crossover(pop, parents_idx, type_crossover='UX'):
         parents_X = pop[parents_idx].get('X')
 
         offsprings = Population(len(parents_idx))
-        offsprings_X = []
-        offsprings_hashX = []
+        offsprings_X, offsprings_hashX = [], []
 
-        crossover_count = 0
+        n_crossovers = 0
+
         while len(offsprings_X) < len(parents_idx):
-            crossover_count += 1
-
-            crossover_pt = np.random.randint(1, len(parents_X[0]) - 1)
-
             tmp_offsprings_X = parents_X.copy()
 
-            tmp_offsprings_X[0][crossover_pt:], tmp_offsprings_X[1][crossover_pt:] = \
-                tmp_offsprings_X[1][crossover_pt:], tmp_offsprings_X[0][crossover_pt:].copy()
+            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                if type_crossover == '1X':
+                    crossover_pt = np.random.randint(1, len(parents_X[0]) - 1)
 
-            tmp_offsprings_hashX = [''.join(tmp_offsprings_X[0].tolist()), ''.join(tmp_offsprings_X[0].tolist())]
+                    tmp_offsprings_X[0][crossover_pt:], tmp_offsprings_X[1][crossover_pt:] = \
+                        tmp_offsprings_X[1][crossover_pt:], tmp_offsprings_X[0][crossover_pt:].copy()
+
+                elif type_crossover == 'UX':
+                    crossover_pts = np.random.randint(0, 2, tmp_offsprings_X[0].shape, dtype=np.bool)
+
+                    tmp_offsprings_X[0][crossover_pts], tmp_offsprings_X[1][crossover_pts] = \
+                        tmp_offsprings_X[1][crossover_pts], tmp_offsprings_X[0][crossover_pts].copy()
+
+                elif type_crossover == '2X':
+                    crossover_pts = np.random.choice(range(1, len(parents_X[0]) - 1), 2, replace=False)
+                    lower = min(crossover_pts)
+                    upper = max(crossover_pts)
+
+                    tmp_offsprings_X[0][lower:upper], tmp_offsprings_X[1][lower:upper] = \
+                        tmp_offsprings_X[1][lower:upper], tmp_offsprings_X[0][lower:upper].copy()
+                else:
+                    raise Exception('Crossover method is not available!')
+
+                tmp_offsprings_hashX = [''.join(tmp_offsprings_X[0].tolist()), ''.join(tmp_offsprings_X[0].tolist())]
+
+            else:
+                # if type_crossover == 'UX':
+                crossover_pts = np.random.randint(0, 2, tmp_offsprings_X[0][-1].shape, dtype=np.bool)
+
+                tmp_offsprings_X[0][-1][crossover_pts], tmp_offsprings_X[1][-1][crossover_pts] = \
+                    tmp_offsprings_X[1][-1][crossover_pts], tmp_offsprings_X[0][-1][crossover_pts].copy()
+
+                tmp_module_spec1 = api.ModelSpec(matrix=np.array(tmp_offsprings_X[0][:-1], dtype=np.int),
+                                                 ops=tmp_offsprings_X[0][-1].tolist())
+                tmp_module_spec2 = api.ModelSpec(matrix=np.array(tmp_offsprings_X[1][:-1], dtype=np.int),
+                                                 ops=tmp_offsprings_X[1][-1].tolist())
+
+                offspring1_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec1)
+                offspring2_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec2)
+
+                tmp_offsprings_hashX = [offspring1_hashX, offspring2_hashX]
 
             for i in range(len(tmp_offsprings_hashX)):
-                if crossover_count < 100:
-                    if (tmp_offsprings_hashX[i] not in pop_hashX) and (tmp_offsprings_hashX[i] not in offsprings_hashX):
+                if n_crossovers <= 100:
+                    if tmp_offsprings_hashX[i] not in offsprings_hashX:
                         offsprings_X.append(tmp_offsprings_X[i])
                         offsprings_hashX.append(tmp_offsprings_hashX[i])
                 else:
                     offsprings_X.append(tmp_offsprings_X[i])
                     offsprings_hashX.append(tmp_offsprings_hashX[i])
 
-        offsprings.set('X', offsprings_X[:len(parents_idx)])
-        offsprings.set('hashX', offsprings_hashX[:len(parents_idx)])
+            n_crossovers += 1
+
+        idxs = random.perm(len(offsprings_X))
+
+        offsprings_X = np.array(offsprings_X)[idxs[:len(parents_idx)]]
+        offsprings_hashX = np.array(offsprings_hashX)[idxs[:len(parents_idx)]]
+
+        offsprings.set('X', offsprings_X)
+        offsprings.set('hashX', offsprings_hashX)
         return offsprings
 
     @staticmethod
@@ -294,30 +313,72 @@ class MOEADNET(GeneticAlgorithm):
         old_offsprings_X = old_offsprings.get('X')
 
         while len(new_offsprings_X) < len(old_offsprings):
-            for i in range(len(old_offsprings_X)):
-                tmp_new_offspring_X = old_offsprings_X[i].copy()
+            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                for i in range(len(old_offsprings_X)):
+                    tmp_new_offspring_X = old_offsprings_X[i].copy()
 
-                prob_mutation_idxs = np.random.rand(len(old_offsprings_X[i]))
-                for j in range(len(prob_mutation_idxs)):
-                    if prob_mutation_idxs[j] < prob_mutation:
-                        allowed_choices = ['I', '1', '2']
-                        allowed_choices.remove(tmp_new_offspring_X[j])
+                    prob_mutation_idxs = np.random.rand(len(old_offsprings_X[i]))
+                    for j in range(len(prob_mutation_idxs)):
+                        if prob_mutation_idxs[j] < prob_mutation:
+                            allowed_choices = ['I', '1', '2']
+                            allowed_choices.remove(tmp_new_offspring_X[j])
 
-                        tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
+                            tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
 
-                tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
-                if (tmp_new_offspring_hashX not in pop_hashX) and (tmp_new_offspring_hashX not in new_offsprings_hashX):
-                    new_offsprings_X.append(tmp_new_offspring_X)
-                    new_offsprings_hashX.append(tmp_new_offspring_hashX)
+                    tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
+                    if (tmp_new_offspring_hashX not in pop_hashX) and (tmp_new_offspring_hashX not in new_offsprings_hashX):
+                        new_offsprings_X.append(tmp_new_offspring_X)
+                        new_offsprings_hashX.append(tmp_new_offspring_hashX)
+
+            else:
+                for x in old_offsprings_X:
+                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
+                    new_ops = copy.deepcopy(x[-1, :])
+                    # In expectation, V edges flipped (note that most end up being pruned).
+                    # edge_mutation_prob = 1 / 7
+                    for src in range(0, 7 - 1):
+                        for dst in range(src + 1, 7):
+                            if np.random.rand() < prob_mutation:
+                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
+
+                    # In expectation, one op is resampled.
+                    # op_mutation_prob = 1 / 5
+                    for ind in range(1, 7 - 1):
+                        if np.random.rand() < prob_mutation:
+                            available = [o for o in BENCHMARK_API.config['available_ops'] if o != new_ops[ind]]
+                            new_ops[ind] = np.random.choice(available)
+                    new_modelspec = api.ModelSpec(new_matrix, new_ops.tolist())
+
+                    if BENCHMARK_API.is_valid(new_modelspec):
+                        hashX = BENCHMARK_API.get_module_hash(new_modelspec)
+                        if (hashX not in new_offsprings_hashX) and \
+                                (hashX not in pop_hashX):
+                            new_offsprings_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
+                            new_offsprings_hashX.append(hashX)
 
         new_offsprings.set('X', new_offsprings_X[:len(old_offsprings)])
         new_offsprings.set('hashX', new_offsprings_hashX[:len(old_offsprings)])
         return new_offsprings
 
     @staticmethod
-    def _fit_acc_predictor(inputs, targets):
-        acc_predictor = get_acc_predictor('mlp', inputs, targets)
-        return acc_predictor, acc_predictor.predict(inputs)
+    def _create_surrogate_model(inputs, targets):
+        surrogate_model = get_acc_predictor('mlp', inputs, targets)
+        return surrogate_model
+
+    def _initialize_custom(self):
+        self._decomposition = Tchebicheff()
+
+        pop = self._sampling(self.pop_size)
+        pop_F = self.true_evaluate(X=pop.get('X'))
+        pop.set('F', pop_F)
+        if self.using_surrogate_model:
+            self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
+                                                                targets=pop_F[:, 1])
+            print('-> initialize surrogate model - done')
+
+        self.ideal_point = np.min(pop.get('F'), axis=0)
+
+        return pop
 
     def local_search_on_X(self, pop, X, ls_on_knee_solutions=False):
         off_ = pop.new()
@@ -632,22 +693,10 @@ class MOEADNET(GeneticAlgorithm):
 
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
-    def _next(self, pop):
-        if self.using_surrogate_model:
-            if self.n_gen % self.update_model_after_n_gens == 0:
-                if len(self.models_for_training) < 500:
-                    x = np.array(self.models_for_training)
-                    self.models_for_training = []
-                else:
-                    idxs = random.perm(len(self.models_for_training))
-                    x = np.array(self.models_for_training)[idxs[:500]]
-                    self.models_for_training = self.models_for_training[idxs[500:]]
-                y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
-                self.surrogate_model.fit(x=encode(x), y=y)
-                print('Update surrogate model - Done')
-
+    def _mating(self, pop):
         # iterate for each member of the population in random order
         idxs = random.perm(len(pop))
+
         for idx in idxs:
             # all neighbors of this individual and corresponding weights
             N = self.neighbors[idx, :]
@@ -720,7 +769,13 @@ class MOEADNET(GeneticAlgorithm):
             I = np.where(off_FV < FV)[0]
             pop[N[I]] = offspring
 
-        ''' Local Search on PF '''
+        return pop
+
+    def _next(self, pop):
+        # mating
+        pop = self._mating(pop)
+
+        # local search on pareto front
         if LOCAL_SEARCH_ON_PARETO_FRONT:
             pop_F = pop.get('F')
 
@@ -736,12 +791,12 @@ class MOEADNET(GeneticAlgorithm):
                     self.local_search_on_X(pop, X=pareto_front)
             pop[front_0] = pareto_front
 
-            ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
+            # update elitist archive - local search on pareto front
             self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
                 update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
                                        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
 
-        ''' Local Search on Knee Solutions '''
+        # local search on knee solutions
         if LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
             pop_F = pop.get('F')
 
@@ -750,7 +805,7 @@ class MOEADNET(GeneticAlgorithm):
             pareto_front = pop[front_0].copy()
             f_pareto_front = pop_F[front_0].copy()
 
-            # Normalize val_error for calculating angle between two individuals
+            # normalize val_error for calculating angle between two individuals
             f_pareto_front_normalize = pop_F[front_0].copy()
 
             min_f1 = np.min(f_pareto_front[:, 1])
@@ -802,7 +857,7 @@ class MOEADNET(GeneticAlgorithm):
                 knee_solutions, non_dominance_X, non_dominance_hashX, non_dominance_F = \
                     self.local_search_on_X(pop, X=knee_solutions, ls_on_knee_solutions=True)
 
-            ''' UPDATE ELITIST ARCHIVE AFTER LOCAL SEARCH '''
+            # update elitist archive - local search on knee solutions
             self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
                 update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
                                        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
@@ -834,14 +889,29 @@ class MOEADNET(GeneticAlgorithm):
 
             self._do_each_gen()
 
-            if self.n_gen == 20:
-                self.using_surrogate_model = False
-
         self._finalize()
         return
 
     def _do_each_gen(self):
-        # print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
+        if self.using_surrogate_model \
+                and (self.max_no_evaluations - self.no_evaluations > self.max_no_evaluations // 3) \
+                and (self.n_gen % self.update_model_after_n_gens == 0):
+
+            if len(self.models_for_training) < 500:
+                x = np.array(self.models_for_training)
+                self.models_for_training = []
+            else:
+                idxs = random.perm(len(self.models_for_training))
+                x = np.array(self.models_for_training)[idxs[:500]]
+                self.models_for_training = np.array(self.models_for_training)[idxs[500:]].tolist()
+
+            y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
+            self.surrogate_model.fit(x=encode(x), y=y)
+            print('Update surrogate model - Done')
+
+        if DEBUG:
+            print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
+
         if SAVE:
             pf = self.elitist_archive_F
             pf = pf[np.argsort(pf[:, 0])]
@@ -860,6 +930,7 @@ class MOEADNET(GeneticAlgorithm):
 
     def _finalize(self):
         if SAVE:
+            # visualize DPFS
             pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
             plt.plot(self.no_eval, self.dpfs)
             plt.xlabel('No.Evaluations')
@@ -868,68 +939,64 @@ class MOEADNET(GeneticAlgorithm):
             plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
             plt.clf()
 
+            # visualize elitist archive
             plt.scatter(BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1], facecolors='none', edgecolors='blue', s=40,
                         label='true pf')
-            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15, label='elitist archive')
-            plt.xlabel('MMACs (normalize)')
+            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15,
+                        label='elitist archive')
+            if BENCHMARK_NAME == 'nas101':
+                plt.xlabel('params (normalize)')
+            else:
+                plt.xlabel('MMACs (normalize)')
             plt.ylabel('validation error')
             plt.legend()
             plt.grid()
             plt.savefig(f'{self.path}/final_pf')
             plt.clf()
 
-    # def reset_params(self):
-    #     self._decomposition = None
-    #     self.ideal_point = None
-    #
-    #     self.elitist_archive_X = []
-    #     self.elitist_archive_hashX = []
-    #     self.elitist_archive_F = []
-    #
-    #     self.dpfs = []
-    #     self.no_eval = []
-    #
-    #     self.surrogate_model = None
-    #     self.models_for_training = []
-    #
-    #     self.no_evaluations = 0
-
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('MOEAD for NAS')
+    # parser = argparse.ArgumentParser('MOEAD for NAS')
+    #
+    # # hyper-parameters for problem
+    # parser.add_argument('--benchmark_name', type=str, default='cifar10',
+    #                     help='the benchmark used for optimizing')
+    # parser.add_argument('--max_no_evaluations', type=int, default=10000)
+    #
+    # # hyper-parameters for main
+    # parser.add_argument('--seed', type=int, default=0, help='random seed')
+    # parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
+    # parser.add_argument('--save', type=int, default=1, help='save log file')
+    # parser.add_argument('--debug', type=int, default=1)
+    #
+    # # hyper-parameters for algorithm (MOEAD)
+    # parser.add_argument('--algorithm_name', type=str, default='moead', help='name of algorithm used')
+    # parser.add_argument('--n_points', type=int, default=100)
+    # parser.add_argument('--crossover_type', type=str, default='UX')
+    #
+    # parser.add_argument('--using_surrogate_model', type=int, default=0)
+    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
+    #
+    # parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
+    # parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
+    # parser.add_argument('--local_search_on_n_points', type=int, default=1)
+    # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
+    #
+    # args = parser.parse_args()
 
-    # hyper-parameters for problem
-    parser.add_argument('--benchmark_name', type=str, default='cifar10',
-                        help='the benchmark used for optimizing')
-    parser.add_argument('--max_no_evaluations', type=int, default=10000)
+    user_input = [[0, 0, 0, 0],
+                  [1, 0, 1, 0],
+                  [1, 0, 2, 0],
+                  [0, 1, 1, 0],
+                  [0, 1, 2, 0],
+                  [1, 0, 1, 1],
+                  [1, 0, 2, 1],
+                  [0, 1, 1, 1],
+                  [0, 1, 2, 1]]
 
-    # hyper-parameters for main
-    parser.add_argument('--seed', type=int, default=0, help='random seed')
-    parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
-    parser.add_argument('--save', type=int, default=1, help='save log file')
-
-    # hyper-parameters for algorithm (MOEAD)
-    parser.add_argument('--algorithm_name', type=str, default='moead', help='name of algorithm used')
-    parser.add_argument('--n_points', type=int, default=100)
-
-    parser.add_argument('--using_surrogate_model', type=int, default=0)
-    parser.add_argument('--update_model_after_n_gens', type=int, default=10)
-
-    parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
-    parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
-    parser.add_argument('--local_search_on_n_points', type=int, default=1)
-    parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
-
-    args = parser.parse_args()
-
-    BENCHMARK_NAME = args.benchmark_name
-    BENCHMARK_DATA = None
-    BENCHMARK_MIN_MAX = None
-    BENCHMARK_PF_TRUE = None
-
+    BENCHMARK_NAME = 'cifar10'
     if BENCHMARK_NAME == 'nas101':
-        nasbench_tfrecord = 'nasbench/nasbench_only108.tfrecord'
-        BENCHMARK_API = api.NASBench_(nasbench_tfrecord)
+        BENCHMARK_API = api.NASBench_()
         BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
         BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
         BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
@@ -939,7 +1006,7 @@ if __name__ == '__main__':
         BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
         BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
 
-    elif BENCHMARK_NAME == 'cifar100':
+    else:
         BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
         BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
         BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
@@ -947,71 +1014,118 @@ if __name__ == '__main__':
     BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
     print('--> Load benchmark - Done')
 
-    SAVE = bool(args.save)
+    SAVE = True
+    DEBUG = False
+    MAX_NO_EVALUATIONS = 30000
 
-    ALGORITHM_NAME = args.algorithm_name
+    ALGORITHM_NAME = 'moead'
+    N_POINTS = 100
+    CROSSOVER_TYPE = 'UX'
 
-    N_POINTS = args.n_points
-    MAX_NO_EVALUATIONS = args.max_no_evaluations
+    USING_SURROGATE_MODEL = False
+    UPDATE_MODEL_AFTER_N_GENS = 0
 
-    LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
-    LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
-    LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
-    LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
+    NUMBER_OF_RUNS = 10
+    INIT_SEED = 0
 
-    USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
-    UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
+    for _input in user_input:
+        # BENCHMARK_NAME = args.benchmark_name
+        # BENCHMARK_DATA = None
+        # BENCHMARK_MIN_MAX = None
+        # BENCHMARK_PF_TRUE = None
 
-    NUMBER_OF_RUNS = args.number_of_runs
-    INIT_SEED = args.seed
+        # if BENCHMARK_NAME == 'nas101':
+        #     BENCHMARK_API = api.NASBench_()
+        #     BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+        #
+        # elif BENCHMARK_NAME == 'cifar10':
+        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+        #
+        # elif BENCHMARK_NAME == 'cifar100':
+        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+        #
+        # BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
+        # print('--> Load benchmark - Done')
+        #
+        # SAVE = bool(args.save)
+        # DEBUG = bool(args.debug)
+        # MAX_NO_EVALUATIONS = args.max_no_evaluations
+        #
+        # ALGORITHM_NAME = args.algorithm_name
+        #
+        # N_POINTS = args.n_points
+        # CROSSOVER_TYPE = args.crossover_type
 
-    now = datetime.now()
-    dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{N_POINTS}_'
-                            f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
-                            f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
-                            f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
-                            f'%d_%m_%H_%M')
-    root_path = dir_name
+        # LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
+        # LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
+        # LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
+        # LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
 
-    # Create root folder
-    os.mkdir(root_path)
-    print(f'--> Create folder {root_path} - Done\n')
+        LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
+        LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
+        LOCAL_SEARCH_ON_N_POINTS = _input[2]
+        LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
 
-    for i_run in range(NUMBER_OF_RUNS):
-        SEED = INIT_SEED + i_run * 100
-        np.random.seed(SEED)
-        torch.random.manual_seed(SEED)
+        # USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
+        # UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
 
-        sub_path = root_path + f'/{i_run}'
+        # NUMBER_OF_RUNS = args.number_of_runs
+        # INIT_SEED = args.seed
 
-        # Create new folder (i_run) in root folder
-        os.mkdir(sub_path)
-        print(f'--> Create folder {sub_path} - Done')
+        now = datetime.now()
+        dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{N_POINTS}_{CROSSOVER_TYPE}_'
+                                f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
+                                f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
+                                f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
+                                f'd%d_m%m_H%H_M%M')
+        ROOT_PATH = dir_name
 
-        # Create new folder (pf_eval) in 'i_run' folder
-        os.mkdir(sub_path + '/pf_eval')
-        print(f'--> Create folder {sub_path}/pf_eval - Done')
+        # Create root folder
+        os.mkdir(ROOT_PATH)
+        print(f'--> Create folder {ROOT_PATH} - Done\n')
 
-        # Create new folder (visualize_pf_each_gen) in 'i_run' folder
-        os.mkdir(sub_path + '/visualize_pf_each_gen')
-        print(f'--> Create folder {sub_path}/visualize_pf_each_gen - Done\n')
+        for i_run in range(NUMBER_OF_RUNS):
+            SEED = INIT_SEED + i_run * 100
+            np.random.seed(SEED)
+            torch.random.manual_seed(SEED)
 
-        INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=N_POINTS).do()
-        net = MOEADNET(
-            max_no_evaluations=MAX_NO_EVALUATIONS,
-            using_surrogate_model=USING_SURROGATE_MODEL,
-            update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-            path=sub_path,
-            ref_dirs=INIT_REF_DIRS,
-            n_neighbors=10,
-            prob_neighbor_mating=1.0)
+            SUB_PATH = ROOT_PATH + f'/{i_run}'
 
-        start = timeit.default_timer()
-        print(f'--> Experiment {i_run + 1} running')
-        net.solve_custom()
-        end = timeit.default_timer()
+            # Create new folder (i_run) in root folder
+            os.mkdir(SUB_PATH)
+            print(f'--> Create folder {SUB_PATH} - Done')
 
-        print(f'--> The number of runs DONE: {i_run + 1}/{NUMBER_OF_RUNS}')
-        print(f'--> Took {end - start} seconds\n')
+            # Create new folder (pf_eval) in 'i_run' folder
+            os.mkdir(SUB_PATH + '/pf_eval')
+            print(f'--> Create folder {SUB_PATH}/pf_eval - Done')
 
-    print(f'All {NUMBER_OF_RUNS} runs - Done\nResults are saved on folder {root_path}')
+            # Create new folder (visualize_pf_each_gen) in 'i_run' folder
+            os.mkdir(SUB_PATH + '/visualize_pf_each_gen')
+            print(f'--> Create folder {SUB_PATH}/visualize_pf_each_gen - Done\n')
+
+            INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=N_POINTS).do()
+            net = MOEADNET(
+                max_no_evaluations=MAX_NO_EVALUATIONS,
+                crossover_type=CROSSOVER_TYPE,
+                using_surrogate_model=USING_SURROGATE_MODEL,
+                update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+                path=SUB_PATH,
+                ref_dirs=INIT_REF_DIRS,
+                n_neighbors=10,
+                prob_neighbor_mating=1.0)
+
+            start = timeit.default_timer()
+            print(f'--> Experiment {i_run + 1} is running.')
+            net.solve_custom()
+            end = timeit.default_timer()
+
+            print(f'--> The number of runs DONE: {i_run + 1}/{NUMBER_OF_RUNS}')
+            print(f'--> Took {end - start} seconds.\n')
+
+        print(f'All {NUMBER_OF_RUNS} runs - Done\nResults are saved on folder {ROOT_PATH}.')
