@@ -246,7 +246,6 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'DPFS']
-    # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
@@ -401,7 +400,6 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'Hypervolume']
-    # colors = ['red', 'blue', 'green', 'orange', 'black', 'purple']
 
     for i in range(len(paths)):
         # pickle.dump([no_eval_avg_each_path[i], hp_avg_each_path[i]], open(f'{paths[i]}_hp.p', 'wb'))
@@ -427,21 +425,23 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
 
 def main():
-    folder = 'results/cifar10(moead)'
     paths = []
-    for path in os.listdir(folder):
-        paths.append(folder + '/' + path)
+    for path in os.listdir(FOLDER):
+        paths.append(FOLDER + '/' + path)
 
-    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=True, log_y=False)
+    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
 
-    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=True, log_y=False)
+    visualize_hp_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
 
 
 if __name__ == '__main__':
     SAVE = False
+    LOG_X = True
+    LOG_Y = False
+    FOLDER = 'results/run'
     if SAVE:
         now = datetime.now()
         dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')

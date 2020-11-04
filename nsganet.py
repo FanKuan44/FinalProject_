@@ -422,7 +422,7 @@ class NSGANet(GeneticAlgorithm):
         if self.using_surrogate_model:
             self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
                                                                 targets=pop_F[:, 1])
-            print('-> initialize surrogate model - done')
+            # print('-> initialize surrogate model - done')
 
         pop = self.survival.do(pop, self.pop_size)
 
@@ -441,9 +441,9 @@ class NSGANet(GeneticAlgorithm):
         if ls_on_knee_solutions:
             first, last = len(x_old_X) - 2, len(x_old_X) - 1
 
-        if LOCAL_SEARCH_ON_N_POINTS == 1:
-            stop_iter = 30
+        stop_iter = 14
 
+        if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -520,8 +520,6 @@ class NSGANet(GeneticAlgorithm):
                                 non_dominance_F.append(x_new_F)
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
-            stop_iter = 30
-
             for i in range(len(x_old_X)):
 
                 max_n_searching = 100
@@ -619,9 +617,9 @@ class NSGANet(GeneticAlgorithm):
 
         non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
 
-        if LOCAL_SEARCH_ON_N_POINTS == 1:
-            stop_iter = 30
+        stop_iter = 14
 
+        if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -697,8 +695,6 @@ class NSGANet(GeneticAlgorithm):
                         j += 1
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
-            stop_iter = 30
-
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -984,7 +980,9 @@ class NSGANet(GeneticAlgorithm):
 
             y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
             self.surrogate_model.fit(x=encode(x), y=y)
-            print('Update surrogate model - Done')
+
+            if DEBUG:
+                print('Update surrogate model - Done')
 
         if DEBUG:
             print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
@@ -1182,17 +1180,19 @@ if __name__ == '__main__':
     # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
     # args = parser.parse_args()
 
-    user_input = [#[0, 0, 0, 0],
-                  #[1, 0, 1, 0],
-                  #[1, 0, 2, 0],
-                  #[0, 1, 1, 0],
-                  #[0, 1, 2, 0],
-                  #[1, 0, 1, 1],
-                  #[1, 0, 2, 1],
-                  #[0, 1, 1, 1],
-                  [0, 1, 2, 1]]
+    # user_input = [[0, 0, 0, 0],
+    #               [1, 0, 1, 0],
+    #               [1, 0, 2, 0],
+    #               [0, 1, 1, 0],
+    #               [0, 1, 2, 0],
+    #               [1, 0, 1, 1],
+    #               [1, 0, 2, 1],
+    #               [0, 1, 1, 1],
+    #               [0, 1, 2, 1]]
 
-    BENCHMARK_NAME = 'cifar10'
+    user_input = [[0, 1, 1, 0]]
+
+    BENCHMARK_NAME = 'cifar100'
 
     if BENCHMARK_NAME == 'nas101':
         BENCHMARK_API = api.NASBench_()
