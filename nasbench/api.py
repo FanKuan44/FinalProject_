@@ -111,7 +111,7 @@ class OutOfDomainError(Exception):
 
 class NASBench(object):
   """User-facing API for accessing the NASBench dataset."""
-  def __init__(self, dataset_file, seed=None):
+  def __init__(self, dataset_file=None, seed=None):
     """Initialize dataset, this should only be done once per experiment.
 
     Args:

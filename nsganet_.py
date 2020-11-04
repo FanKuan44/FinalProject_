@@ -1,42 +1,39 @@
 import argparse
-import copy
+import keras
+import kerop
 import os
-import pickle as pk
-import timeit
 import matplotlib.pyplot as plt
 import numpy as np
+import pickle as pk
+import timeit
 import torch
 
+from acc_predictor.factory import get_acc_predictor
 from datetime import datetime
 
-from pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
-from pymoo.cython.decomposition import Tchebicheff
 from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
 from pymoo.operators.default_operators import set_if_none
 from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
 from pymoo.operators.sampling.random_sampling import RandomSampling
+from pymoo.operators.selection.tournament_selection import compare, TournamentSelection
 from pymoo.rand import random
-from pymoo.util.non_dominated_sorting import NonDominatedSorting
 from pymoo.util.display import disp_multi_objective
-from pymoo.util.reference_direction import UniformReferenceDirectionFactory
+from pymoo.util.dominator import Dominator
+from pymoo.util.non_dominated_sorting import NonDominatedSorting
+from pymoo.util.randomized_argsort import randomized_argsort
 
-from scipy.spatial.distance import cdist
-from acc_predictor.factory import get_acc_predictor
-
-from nasbench import wrap_api as api
-from nasbench.lib import model_spec
-
+# =========================================================================================================
+# Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
+# =========================================================================================================
+from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
+from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.util.compare import find_better_idv, find_better_idv_bosman_ver
-from wrap_pymoo.util.dpfs_calculating import cal_dpfs
 from wrap_pymoo.util.elitist_archive import update_elitist_archive
 from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
 
-ModelSpec = model_spec.ModelSpec
-
-# =========================================================================================================
-# Implementation based on moead from https://github.com/msu-coinlab/pymoo
-# =========================================================================================================
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 def encode(X):
@@ -47,47 +44,75 @@ def encode(X):
     return encode_X
 
 
-class MOEADNET(GeneticAlgorithm):
+def remove_values_from_list(list_x, val):
+    return [value for value in list_x if value != val]
+
+
+def create_and_evaluate_model(x):
+    x = remove_values_from_list(x, 'I')
+
+    keras.backend.clear_session()
+    model = keras.Sequential()
+    model.add(keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(32, 32, 3)))
+
+    if len(x) != 0:
+        if x[0] == '1':
+            model.add(keras.layers.BatchNormalization())
+            model.add(keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu'))
+        elif x[0] == '2':
+            model.add(keras.layers.BatchNormalization())
+            model.add(keras.layers.Conv2D(32, (5, 5), padding='same', activation='relu'))
+
+        model.add(keras.layers.MaxPooling2D((2, 2)))
+        model.add(keras.layers.Dropout(0.25))
+
+        filters = 64
+
+        for i in range(1, len(x)):
+            if x[i] == '1':
+                model.add(keras.layers.Conv2D(filters, (3, 3), padding='same', activation='relu'))
+            else:
+                model.add(keras.layers.Conv2D(filters, (5, 5), padding='same', activation='relu'))
+            if i % 2 == 0:
+                model.add(keras.layers.MaxPooling2D((2, 2)))
+                model.add(keras.layers.Dropout(0.25))
+                filters *= 2
+            else:
+                model.add(keras.layers.BatchNormalization())
+
+    model.add(keras.layers.Flatten())
+    model.add(keras.layers.Dense(1024, activation='relu'))
+    model.add(keras.layers.Dropout(0.4))
+    model.add(keras.layers.Dense(10, activation='softmax'))
+
+    _, layer_flops, _, _ = kerop.profile(model)
+
+    val_acc = (sum(layer_flops) / 1e9) + np.random.uniform(0, 0.5)
+    FLOPs = sum(layer_flops) / 1e6  # --> or test_acc
+
+    return FLOPs, val_acc
+
+
+class NSGANet(GeneticAlgorithm):
     def __init__(self,
                  max_no_evaluations,
                  crossover_type,
                  using_surrogate_model,
                  update_model_after_n_gens,
                  path,
-                 ref_dirs,
-                 n_neighbors=20,
-                 prob_neighbor_mating=0.7,
                  **kwargs):
 
-        self.n_neighbors = n_neighbors
-        self.prob_neighbor_mating = prob_neighbor_mating
-
-        self._decomposition = None
-        self.ideal_point = None
-
-        set_if_none(kwargs, 'pop_size', len(ref_dirs))
+        set_if_none(kwargs, 'individual', Individual(rank=np.inf, crowding=-1))
         set_if_none(kwargs, 'sampling', RandomSampling())
         set_if_none(kwargs, 'crossover', SimulatedBinaryCrossover(prob=1.0, eta=20))
         set_if_none(kwargs, 'mutation', PolynomialMutation(prob=None, eta=20))
-        set_if_none(kwargs, 'survival', None)
-        set_if_none(kwargs, 'selection', None)
-
         super().__init__(**kwargs)
 
+        self.tournament_type = 'comp_by_dom_and_crowding'
         self.func_display_attrs = disp_multi_objective
 
-        self.ref_dirs = ref_dirs
-
-        if self.ref_dirs.shape[0] < self.n_neighbors:
-            print('Setting number of neighbors to number of reference directions : %s' % self.ref_dirs.shape[0])
-            self.n_neighbors = self.ref_dirs.shape[0]
-
-        # neighbours includes the entry by itself intentionally for the survival method
-        self.neighbors = np.argsort(cdist(self.ref_dirs, self.ref_dirs), axis=1, kind='quicksort')[:, :self.n_neighbors]
-
-        ''' customize '''
+        ''' Custom '''
         self.crossover_type = crossover_type
-
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
 
         self.dpfs = []
@@ -104,124 +129,77 @@ class MOEADNET(GeneticAlgorithm):
         self.path = path
 
     def true_evaluate(self, X, count_n_evaluations=True):
-        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-            if len(X.shape) == 1:
-                F = np.full(2, fill_value=np.nan)
+        if len(X.shape) == 1:
+            F = np.full(2, fill_value=np.nan)
 
-                hashX = ''.join(X.tolist())
+            FLOPs, val_acc = create_and_evaluate_model(X)
+            if FLOPs < MIN_FLOPs or FLOPs > MAX_FLOPs:
+                print(X, FLOPs)
+            F[0] = (FLOPs - MIN_FLOPs) / (MAX_FLOPs - MIN_FLOPs)
+            F[1] = 1 - val_acc
 
-                F[0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
-                       / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
-                F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc'] / 100
+            if count_n_evaluations:
+                self.no_evaluations += 1
+
+        else:
+            F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+            for i in range(X.shape[0]):
+                FLOPs, val_acc = create_and_evaluate_model(X[i])
+
+                F[i][0] = (FLOPs - MIN_FLOPs) / (MAX_FLOPs - MIN_FLOPs)
+                if FLOPs < MIN_FLOPs or FLOPs > MAX_FLOPs:
+                    print(X[i], FLOPs)
+                F[i][1] = 1 - val_acc
 
                 if count_n_evaluations:
                     self.no_evaluations += 1
 
-            else:
-                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
-                for i in range(X.shape[0]):
-                    hashX = ''.join(X[i].tolist())
-
-                    F[i][0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
-                              / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
-                    F[i][1] = 1 - BENCHMARK_DATA[hashX]['val_acc'] / 100
-
-                    if count_n_evaluations:
-                        self.no_evaluations += 1
-
-        else:
-            if len(X.shape) == 2:
-                F = np.full(2, fill_value=np.nan)
-
-                modelspec = api.ModelSpec(matrix=np.array(X[:-1], dtype=np.int), ops=X[-1].tolist())
-                hashX = BENCHMARK_API.get_module_hash(modelspec)
-
-                F[0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
-                        BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
-                F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
-
-                if count_n_evaluations:
-                    self.no_evaluations += 1
-
-            else:
-                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
-
-                for i in range(X.shape[0]):
-                    modelspec = api.ModelSpec(matrix=np.array(X[i][:-1], dtype=np.int), ops=X[i][-1].tolist())
-                    hashX = BENCHMARK_API.get_module_hash(modelspec)
-
-                    F[i, 0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
-                            BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
-                    F[i, 1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
-
-                    if count_n_evaluations:
-                        self.no_evaluations += 1
-
         return F
 
-    def fake_evaluate(self, X):
-        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-            encode_X = encode(X)
+    # def fake_evaluate(self, X):
+    #     if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+    #         encode_X = encode(X)
+    #
+    #         if len(encode_X.shape) == 1:
+    #             F = np.full(2, fill_value=np.nan)
+    #
+    #             hashX = ''.join(X.tolist())
+    #
+    #             F[0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
+    #                    / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
+    #             F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
+    #         else:
+    #             F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+    #             for i in range(encode_X.shape[0]):
+    #                 hashX = ''.join(X[i].tolist())
+    #
+    #                 F[i][0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
+    #                           / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
+    #             f1 = self.surrogate_model.predict(encode_X).reshape(X.shape[0])
+    #             F[:, 1] = f1
+    #     else:
+    #         F = None
+    #     return F
 
-            if len(encode_X.shape) == 1:
-                F = np.full(2, fill_value=np.nan)
-
-                hashX = ''.join(X.tolist())
-
-                F[0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
-                       / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
-                F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
-            else:
-                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
-                for i in range(encode_X.shape[0]):
-                    hashX = ''.join(X[i].tolist())
-
-                    F[i][0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
-                              / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
-                f1 = self.surrogate_model.predict(encode_X).reshape(X.shape[0])
-                F[:, 1] = f1
-        else:
-            F = None
-        return F
+    # @staticmethod
+    # def _create_surrogate_model(inputs, targets):
+    #     surrogate_model = get_acc_predictor('mlp', inputs, targets)
+    #     return surrogate_model
 
     @staticmethod
     def _sampling(n_samples):
         pop = Population(n_samples)
         pop_X, pop_hashX = [], []
 
-        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-            allowed_choices = ['I', '1', '2']
+        allowed_choices = ['I', '1', '2']
 
-            while len(pop_X) < n_samples:
-                new_X = np.random.choice(allowed_choices, 14)
-                new_hashX = ''.join(new_X.tolist())
-                if new_hashX not in pop_hashX:
-                    pop_X.append(new_X)
-                    pop_hashX.append(new_hashX)
-        else:
-            INPUT = 'input'
-            OUTPUT = 'output'
-            conv3x3 = 'conv3x3-bn-relu'
-            conv1x1 = 'conv1x1-bn-relu'
-            maxpool3x3 = 'maxpool3x3'
-            num_vertices = 7
-            allowed_ops = [conv1x1, conv3x3, maxpool3x3]
-            allowed_edges = [0, 1]
-            while len(pop_X) < n_samples:
-                matrix = np.random.choice(allowed_edges, size=(num_vertices, num_vertices))
-                matrix = np.triu(matrix, 1)
-                ops = np.random.choice(allowed_ops, size=(1, num_vertices))
-                ops[0][0] = INPUT
-                ops[0][-1] = OUTPUT
-
-                modelspec = api.ModelSpec(matrix=matrix, ops=ops[0].tolist())
-
-                if BENCHMARK_API.is_valid(modelspec):
-                    hashX = BENCHMARK_API.get_module_hash(modelspec)
-                    if hashX not in pop_hashX:
-                        X = np.concatenate((matrix, ops), axis=0)
-                        pop_X.append(X)
-                        pop_hashX.append(hashX)
+        while len(pop_X) < n_samples:
+            new_X = np.random.choice(allowed_choices, 9)
+            new_listX = remove_values_from_list(new_X.tolist(), 'I')
+            new_hashX = ''.join(new_listX)
+            if new_hashX not in pop_hashX:
+                pop_X.append(new_X)
+                pop_hashX.append(new_hashX)
 
         pop.set('X', pop_X)
         pop.set('hashX', pop_hashX)
@@ -229,154 +207,138 @@ class MOEADNET(GeneticAlgorithm):
         return pop
 
     @staticmethod
-    def _crossover(pop, parents_idx, type_crossover='UX'):
-        parents_X = pop[parents_idx].get('X')
+    def _crossover(pop, type_crossover='UX'):
+        pop_X = pop.get('X')
 
-        offsprings = Population(len(parents_idx))
         offsprings_X, offsprings_hashX = [], []
 
         n_crossovers = 0
 
-        while len(offsprings_X) < len(parents_idx):
-            tmp_offsprings_X = parents_X.copy()
+        while len(offsprings_X) < len(pop_X):
+            idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
+            pop_X_ = pop.get('X')[idx]
 
-            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+            for i in range(len(pop_X_)):
+                tmp_offspring1_X, tmp_offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
+
                 if type_crossover == '1X':
-                    crossover_pt = np.random.randint(1, len(parents_X[0]) - 1)
+                    crossover_pt = np.random.randint(1, len(tmp_offspring1_X))
 
-                    tmp_offsprings_X[0][crossover_pt:], tmp_offsprings_X[1][crossover_pt:] = \
-                        tmp_offsprings_X[1][crossover_pt:], tmp_offsprings_X[0][crossover_pt:].copy()
-
-                elif type_crossover == 'UX':
-                    crossover_pts = np.random.randint(0, 2, tmp_offsprings_X[0].shape, dtype=np.bool)
-
-                    tmp_offsprings_X[0][crossover_pts], tmp_offsprings_X[1][crossover_pts] = \
-                        tmp_offsprings_X[1][crossover_pts], tmp_offsprings_X[0][crossover_pts].copy()
+                    tmp_offspring1_X[crossover_pt:], tmp_offspring2_X[crossover_pt:] = \
+                        tmp_offspring2_X[crossover_pt:], tmp_offspring1_X[crossover_pt:].copy()
 
                 elif type_crossover == '2X':
-                    crossover_pts = np.random.choice(range(1, len(parents_X[0]) - 1), 2, replace=False)
+                    crossover_pts = np.random.choice(range(1, len(tmp_offspring1_X) - 1), 2, replace=False)
                     lower = min(crossover_pts)
                     upper = max(crossover_pts)
 
-                    tmp_offsprings_X[0][lower:upper], tmp_offsprings_X[1][lower:upper] = \
-                        tmp_offsprings_X[1][lower:upper], tmp_offsprings_X[0][lower:upper].copy()
+                    tmp_offspring1_X[lower:upper], tmp_offspring2_X[lower:upper] = \
+                        tmp_offspring2_X[lower:upper], tmp_offspring1_X[lower:upper].copy()
+
+                elif type_crossover == 'UX':
+                    crossover_pts = np.random.randint(0, 2, tmp_offspring1_X.shape, dtype=np.bool)
+
+                    tmp_offspring1_X[crossover_pts], tmp_offspring2_X[crossover_pts] = \
+                        tmp_offspring2_X[crossover_pts], tmp_offspring1_X[crossover_pts].copy()
                 else:
-                    raise Exception('Crossover method is not available!')
+                    raise ValueError('Crossover method is not available!')
 
-                tmp_offsprings_hashX = [''.join(tmp_offsprings_X[0].tolist()), ''.join(tmp_offsprings_X[0].tolist())]
+                tmp_offspring1_listX = remove_values_from_list(tmp_offspring1_X.tolist(), 'I')
+                tmp_offspring2_listX = remove_values_from_list(tmp_offspring2_X.tolist(), 'I')
 
-            else:
-                # if type_crossover == 'UX':
-                crossover_pts = np.random.randint(0, 2, tmp_offsprings_X[0][-1].shape, dtype=np.bool)
+                tmp_offspring1_hashX = ''.join(tmp_offspring1_listX)
+                tmp_offspring2_hashX = ''.join(tmp_offspring2_listX)
 
-                tmp_offsprings_X[0][-1][crossover_pts], tmp_offsprings_X[1][-1][crossover_pts] = \
-                    tmp_offsprings_X[1][-1][crossover_pts], tmp_offsprings_X[0][-1][crossover_pts].copy()
-
-                tmp_module_spec1 = api.ModelSpec(matrix=np.array(tmp_offsprings_X[0][:-1], dtype=np.int),
-                                                 ops=tmp_offsprings_X[0][-1].tolist())
-                tmp_module_spec2 = api.ModelSpec(matrix=np.array(tmp_offsprings_X[1][:-1], dtype=np.int),
-                                                 ops=tmp_offsprings_X[1][-1].tolist())
-
-                offspring1_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec1)
-                offspring2_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec2)
-
-                tmp_offsprings_hashX = [offspring1_hashX, offspring2_hashX]
-
-            for i in range(len(tmp_offsprings_hashX)):
                 if n_crossovers <= 100:
-                    if tmp_offsprings_hashX[i] not in offsprings_hashX:
-                        offsprings_X.append(tmp_offsprings_X[i])
-                        offsprings_hashX.append(tmp_offsprings_hashX[i])
+                    if tmp_offspring1_hashX not in offsprings_hashX:
+                        offsprings_X.append(tmp_offspring1_X)
+                        offsprings_hashX.append(tmp_offspring1_hashX)
+
+                    if tmp_offspring2_hashX not in offsprings_hashX:
+                        offsprings_X.append(tmp_offspring2_X)
+                        offsprings_hashX.append(tmp_offspring2_hashX)
                 else:
-                    offsprings_X.append(tmp_offsprings_X[i])
-                    offsprings_hashX.append(tmp_offsprings_hashX[i])
+                    offsprings_X.append(tmp_offspring1_X)
+                    offsprings_hashX.append(tmp_offspring1_hashX)
+
+                    offsprings_X.append(tmp_offspring2_X)
+                    offsprings_hashX.append(tmp_offspring2_hashX)
 
             n_crossovers += 1
 
         idxs = random.perm(len(offsprings_X))
 
-        offsprings_X = np.array(offsprings_X)[idxs[:len(parents_idx)]]
-        offsprings_hashX = np.array(offsprings_hashX)[idxs[:len(parents_idx)]]
+        offspring_X = np.array(offsprings_X)[idxs[:len(pop_X)]]
+        offspring_hashX = np.array(offsprings_hashX)[idxs[:len(pop_X)]]
 
-        offsprings.set('X', offsprings_X)
-        offsprings.set('hashX', offsprings_hashX)
+        offsprings = Population(len(pop))
+
+        offsprings.set('X', offspring_X)
+        offsprings.set('hashX', offspring_hashX)
+
         return offsprings
 
     @staticmethod
-    def _mutation(pop, old_offsprings, prob_mutation):
+    def _mutation(pop, old_offsprings, prob_mutation=0.05):
         pop_hashX = pop.get('hashX')
 
         new_offsprings = Population(len(old_offsprings))
+
         new_offsprings_X = []
         new_offsprings_hashX = []
 
         old_offsprings_X = old_offsprings.get('X')
 
+        n_mutations = 0
+
         while len(new_offsprings_X) < len(old_offsprings):
-            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                for i in range(len(old_offsprings_X)):
-                    tmp_new_offspring_X = old_offsprings_X[i].copy()
 
-                    prob_mutation_idxs = np.random.rand(len(old_offsprings_X[i]))
-                    for j in range(len(prob_mutation_idxs)):
-                        if prob_mutation_idxs[j] < prob_mutation:
-                            allowed_choices = ['I', '1', '2']
-                            allowed_choices.remove(tmp_new_offspring_X[j])
+            prob_mutation_idxs = np.random.rand(old_offsprings_X.shape[0], old_offsprings_X.shape[1])
 
-                            tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
+            for i in range(len(old_offsprings_X)):
+                tmp_new_offspring_X = old_offsprings_X[i].copy()
 
-                    tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
-                    if (tmp_new_offspring_hashX not in pop_hashX) and (tmp_new_offspring_hashX not in new_offsprings_hashX):
+                for j in range(prob_mutation_idxs.shape[1]):
+                    if prob_mutation_idxs[i][j] <= prob_mutation:
+                        allowed_choices = ['I', '1', '2']
+                        allowed_choices.remove(tmp_new_offspring_X[j])
+
+                        tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
+
+                tmp_new_offspring_listX = remove_values_from_list(tmp_new_offspring_X.tolist(), 'I')
+                tmp_new_offspring_hashX = ''.join(tmp_new_offspring_listX)
+
+                if n_mutations <= 100:
+                    if (tmp_new_offspring_hashX not in new_offsprings_hashX) and \
+                            (tmp_new_offspring_hashX not in pop_hashX):
                         new_offsprings_X.append(tmp_new_offspring_X)
                         new_offsprings_hashX.append(tmp_new_offspring_hashX)
+                else:
+                    new_offsprings_X.append(tmp_new_offspring_X)
+                    new_offsprings_hashX.append(tmp_new_offspring_hashX)
 
-            else:
-                for x in old_offsprings_X:
-                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
-                    new_ops = copy.deepcopy(x[-1, :])
-                    # In expectation, V edges flipped (note that most end up being pruned).
-                    # edge_mutation_prob = 1 / 7
-                    for src in range(0, 7 - 1):
-                        for dst in range(src + 1, 7):
-                            if np.random.rand() < prob_mutation:
-                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
+            n_mutations += 1
+        idxs = random.perm(len(new_offsprings_X))
 
-                    # In expectation, one op is resampled.
-                    # op_mutation_prob = 1 / 5
-                    for ind in range(1, 7 - 1):
-                        if np.random.rand() < prob_mutation:
-                            available = [o for o in BENCHMARK_API.config['available_ops'] if o != new_ops[ind]]
-                            new_ops[ind] = np.random.choice(available)
-                    new_modelspec = api.ModelSpec(new_matrix, new_ops.tolist())
+        new_offsprings_X = np.array(new_offsprings_X)[idxs[:len(pop)]]
+        new_offspring_hashX = np.array(new_offsprings_hashX)[idxs[:len(pop)]]
 
-                    if BENCHMARK_API.is_valid(new_modelspec):
-                        hashX = BENCHMARK_API.get_module_hash(new_modelspec)
-                        if (hashX not in new_offsprings_hashX) and \
-                                (hashX not in pop_hashX):
-                            new_offsprings_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
-                            new_offsprings_hashX.append(hashX)
+        new_offsprings.set('X', new_offsprings_X)
+        new_offsprings.set('hashX', new_offspring_hashX)
 
-        new_offsprings.set('X', new_offsprings_X[:len(old_offsprings)])
-        new_offsprings.set('hashX', new_offsprings_hashX[:len(old_offsprings)])
         return new_offsprings
 
-    @staticmethod
-    def _create_surrogate_model(inputs, targets):
-        surrogate_model = get_acc_predictor('mlp', inputs, targets)
-        return surrogate_model
-
     def _initialize_custom(self):
-        self._decomposition = Tchebicheff()
-
         pop = self._sampling(self.pop_size)
+
         pop_F = self.true_evaluate(X=pop.get('X'))
         pop.set('F', pop_F)
-        if self.using_surrogate_model:
-            self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
-                                                                targets=pop_F[:, 1])
-            print('-> initialize surrogate model - done')
-
-        self.ideal_point = np.min(pop.get('F'), axis=0)
+        # if self.using_surrogate_model:
+        #     self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
+        #                                                         targets=pop_F[:, 1])
+        #     print('-> initialize surrogate model - done')
+        #
+        pop = self.survival.do(pop, self.pop_size)
 
         return pop
 
@@ -393,9 +355,9 @@ class MOEADNET(GeneticAlgorithm):
         if ls_on_knee_solutions:
             first, last = len(x_old_X) - 2, len(x_old_X) - 1
 
-        if LOCAL_SEARCH_ON_N_POINTS == 1:
-            stop_iter = 30
+        stop_iter = 14
 
+        if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -435,13 +397,13 @@ class MOEADNET(GeneticAlgorithm):
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.09:
+                                if x_new_F[1] < 0.085:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
                                 if x_new_F[1] < 0.305:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-                            if x_new_X not in self.models_for_training:
-                                self.models_for_training.append(x_new_X)
+
+                            self.models_for_training.append(x_new_X)
                             true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
                         else:
                             x_new_F = self.true_evaluate(x_new_X)
@@ -472,8 +434,6 @@ class MOEADNET(GeneticAlgorithm):
                                 non_dominance_F.append(x_new_F)
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
-            stop_iter = 30
-
             for i in range(len(x_old_X)):
 
                 max_n_searching = 100
@@ -517,15 +477,13 @@ class MOEADNET(GeneticAlgorithm):
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.09:
+                                if x_new_F[1] < 0.085:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
                                 if x_new_F[1] < 0.305:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
 
-                            if x_new_X not in self.models_for_training:
-                                self.models_for_training.append(x_new_X)
-
+                            self.models_for_training.append(x_new_X)
                             true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
                         else:
                             x_new_F = self.true_evaluate(x_new_X)
@@ -573,9 +531,9 @@ class MOEADNET(GeneticAlgorithm):
 
         non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
 
-        if LOCAL_SEARCH_ON_N_POINTS == 1:
-            stop_iter = 30
+        stop_iter = 14
 
+        if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -614,14 +572,13 @@ class MOEADNET(GeneticAlgorithm):
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.09:
+                                if x_new_F[1] < 0.085:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
                                 if x_new_F[1] < 0.305:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
 
-                            if x_new_X not in self.models_for_training:
-                                self.models_for_training.append(x_new_X)
+                            self.models_for_training.append(x_new_X)
                             true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
                         else:
                             x_new_F = self.true_evaluate(x_new_X)
@@ -652,8 +609,6 @@ class MOEADNET(GeneticAlgorithm):
                         j += 1
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
-            stop_iter = 30
-
             for i in range(len(x_old_X)):
                 max_n_searching = 100
                 n_searching = 0
@@ -696,14 +651,13 @@ class MOEADNET(GeneticAlgorithm):
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.09:
+                                if x_new_F[1] < 0.085:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
                                 if x_new_F[1] < 0.305:
                                     x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
 
-                            if x_new_X not in self.models_for_training:
-                                self.models_for_training.append(x_new_X)
+                            self.models_for_training.append(x_new_X)
                             true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
                         else:
                             x_new_F = self.true_evaluate(x_new_X)
@@ -744,102 +698,72 @@ class MOEADNET(GeneticAlgorithm):
         return off_, non_dominance_X, non_dominance_hashX, non_dominance_F
 
     def _mating(self, pop):
-        # iterate for each member of the population in random order
-        idxs = random.perm(len(pop))
+        # crossover
+        offsprings = self._crossover(pop=pop, type_crossover=self.crossover_type)
+        print('crossover - done')
 
-        for idx in idxs:
-            # all neighbors of this individual and corresponding weights
-            N = self.neighbors[idx, :]
-            '''
-            N: bieu dien vi tri neighbor cua ca the thu idx trong quan the
+        ''' evaluate offsprings - crossover '''
+        # if self.using_surrogate_model:
+        #     offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
+        #
+        #     if BENCHMARK_NAME == 'cifar10':
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.085)[0]
+        #     elif BENCHMARK_NAME == 'cifar100':
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+        #     else:
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+        #
+        #     offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
+        #     offsprings.set('F', offsprings_predict_F)
+        #     self.models_for_training.extend(offsprings.get('X').tolist())
+        #     offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
+        # else:
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings.set('F', offsprings_true_F)
 
-            Ngau nhien phat sinh 1 so tu [0, 1]
-            - neu nho hon prob_neighbor_mating thi tien hanh lai ghep giua 2 
-            neighbor ngau nhien
-            - nguoc lai thi chon ngau nhien 2 ca the trong quan the va tien hanh lai ghep
-            '''
-            if random.random() < self.prob_neighbor_mating:
-                parents_idx = N[random.perm(self.n_neighbors)][:self.crossover.n_parents]
-            else:
-                parents_idx = random.perm(self.pop_size)[:self.crossover.n_parents]
+        # update elitist archive - crossover
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
+                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
 
-            # crossover
-            offsprings = self._crossover(pop=pop, parents_idx=parents_idx)
+        # mutation
+        offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
+        print('mutation - done')
 
-            if self.using_surrogate_model:
-                offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
+        ''' evaluate offsprings - mutation '''
+        # if self.using_surrogate_model:
+        #     offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
+        #     if BENCHMARK_NAME == 'cifar10':
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.085)[0]
+        #     elif BENCHMARK_NAME == 'cifar100':
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+        #     else:
+        #         idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+        #
+        #     offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
+        #     offsprings.set('F', offsprings_predict_F)
+        #     self.models_for_training.extend(offsprings.get('X').tolist())
+        #     offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
+        # else:
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings.set('F', offsprings_true_F)
 
-                if BENCHMARK_NAME == 'cifar10':
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.09)[0]
-                elif BENCHMARK_NAME == 'cifar100':
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
-                else:
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+        # update elitist archive - mutation
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+            update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
+                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
 
-                offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
-                offsprings.set('F', offsprings_predict_F)
-                tmp = offsprings.get('X').tolist()
-                for x in tmp:
-                    if x not in self.models_for_training:
-                        self.models_for_training.append(x)
-                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
-            else:
-                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
-                offsprings.set('F', offsprings_true_F)
-
-            # update elitist archive - crossover
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-                update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-            # mutation
-            offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
-
-            if self.using_surrogate_model:
-                offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
-
-                if BENCHMARK_NAME == 'cifar10':
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.09)[0]
-                elif BENCHMARK_NAME == 'cifar100':
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
-                else:
-                    idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
-
-                offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
-                offsprings.set('F', offsprings_predict_F)
-                tmp = offsprings.get('X').tolist()
-                for x in tmp:
-                    if x not in self.models_for_training:
-                        self.models_for_training.append(x)
-                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
-            else:
-                offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
-                offsprings.set('F', offsprings_true_F)
-
-            # update elitist archive - mutation
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
-                update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
-
-            offspring = offsprings[random.randint(0, len(offsprings))]
-            offspring_F = offspring.get('F')
-
-            # update the ideal point
-            self.ideal_point = np.min(np.vstack([self.ideal_point, offspring_F]), axis=0)
-
-            # calculate the decomposed values for each neighbor
-            FV = self._decomposition.do(pop[N].get('F'), weights=self.ref_dirs[N, :], ideal_point=self.ideal_point)
-            off_FV = self._decomposition.do(offspring_F, weights=self.ref_dirs[N, :], ideal_point=self.ideal_point)
-
-            # get the absolute index in F where offspring is better than the current F (decomposed space)
-            I = np.where(off_FV < FV)[0]
-            pop[N[I]] = offspring
-
-        return pop
+        return offsprings
 
     def _next(self, pop):
         # mating
-        pop = self._mating(pop)
+        offsprings = self._mating(pop)
+
+        # merge the offsprings with the current population
+        pop = pop.merge(offsprings)
+
+        # select best individuals
+        pop = self.survival.do(pop, self.pop_size)
 
         # local search on pareto front
         if LOCAL_SEARCH_ON_PARETO_FRONT:
@@ -939,7 +863,7 @@ class MOEADNET(GeneticAlgorithm):
 
         # initialize
         self.pop = self._initialize_custom()
-
+        print('-> initialize - done')
         # update elitist archive - initialize
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
             update_elitist_archive(self.pop.get('X'), self.pop.get('hashX'), self.pop.get('F'),
@@ -948,7 +872,7 @@ class MOEADNET(GeneticAlgorithm):
 
         self._do_each_gen()
 
-        while self.no_evaluations < self.max_no_evaluations or self.n_gen > 250:
+        while self.no_evaluations < self.max_no_evaluations:
             self.n_gen += 1
 
             self.pop = self._next(self.pop)
@@ -959,8 +883,6 @@ class MOEADNET(GeneticAlgorithm):
         return
 
     def _do_each_gen(self):
-        F = self.pop.get('F')
-        plt.scatter(self.pop.get('F'))
         if self.using_surrogate_model \
                 and (self.max_no_evaluations - self.no_evaluations > self.max_no_evaluations // 3) \
                 and (self.n_gen % self.update_model_after_n_gens == 0):
@@ -975,7 +897,9 @@ class MOEADNET(GeneticAlgorithm):
 
             y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
             self.surrogate_model.fit(x=encode(x), y=y)
-            print('Update surrogate model - Done')
+
+            if DEBUG:
+                print('Update surrogate model - Done')
 
         if DEBUG:
             print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
@@ -985,37 +909,21 @@ class MOEADNET(GeneticAlgorithm):
             pf = pf[np.argsort(pf[:, 0])]
             pk.dump([pf, self.no_evaluations], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
 
-            dpfs = round(cal_dpfs(pareto_s=self.elitist_archive_F, pareto_front=BENCHMARK_PF_TRUE), 5)
-            if len(self.no_eval) == 0:
-                self.dpfs.append(dpfs)
-                self.no_eval.append(self.no_evaluations)
-            else:
-                if self.no_evaluations == self.no_eval[-1]:
-                    self.dpfs[-1] = dpfs
-                else:
-                    self.dpfs.append(dpfs)
-                    self.no_eval.append(self.no_evaluations)
+            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='blue', s=15,
+                        label='elitist archive')
+            plt.xlabel('FLOPs (normalize)')
+            plt.ylabel('validation error')
+            plt.legend()
+            plt.grid()
+            plt.savefig(f'{self.path}/pf_visualize/{self.n_gen}')
+            plt.clf()
 
     def _finalize(self):
         if SAVE:
-            # visualize DPFS
-            pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
-            plt.plot(self.no_eval, self.dpfs)
-            plt.xlabel('No.Evaluations')
-            plt.ylabel('DPFS')
-            plt.grid()
-            plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
-            plt.clf()
-
             # visualize elitist archive
-            plt.scatter(BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1], facecolors='none', edgecolors='blue', s=40,
-                        label='true pf')
             plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15,
                         label='elitist archive')
-            if BENCHMARK_NAME == 'nas101':
-                plt.xlabel('params (normalize)')
-            else:
-                plt.xlabel('MMACs (normalize)')
+            plt.xlabel('FLOPs (normalize)')
             plt.ylabel('validation error')
             plt.legend()
             plt.grid()
@@ -1023,8 +931,131 @@ class MOEADNET(GeneticAlgorithm):
             plt.clf()
 
 
+# ---------------------------------------------------------------------------------------------------------
+# Binary Tournament Selection Function
+# ---------------------------------------------------------------------------------------------------------
+
+
+def binary_tournament(pop, P, algorithm):
+    if P.shape[1] != 2:
+        raise ValueError("Only implemented for binary tournament!")
+    tournament_type = algorithm.tournament_type
+    S = np.full(P.shape[0], np.nan)
+    for i in range(P.shape[0]):
+
+        a, b = P[i, 0], P[i, 1]
+
+        if tournament_type == 'comp_by_dom_and_crowding':
+            rel = Dominator.get_relation(pop[a].F, pop[b].F)
+            if rel == 1:
+                S[i] = a
+            elif rel == -1:
+                S[i] = b
+
+        elif tournament_type == 'comp_by_rank_and_crowding':
+            S[i] = compare(a, pop[a].rank, b, pop[b].rank,
+                           method='smaller_is_better')
+
+        else:
+            raise Exception("Unknown tournament type.")
+
+        if np.isnan(S[i]):
+            S[i] = compare(a, pop[a].get("crowding"), b, pop[b].get("crowding"),
+                           method='larger_is_better', return_random_if_equal=True)
+    return S[:, None].astype(np.int)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Survival Selection
+# ---------------------------------------------------------------------------------------------------------
+
+
+class RankAndCrowdingSurvival:
+
+    @staticmethod
+    def do(pop, n_survive):
+        # get the objective space values and objects
+        F = pop.get('F')
+
+        # the final indices of surviving individuals
+        survivors = []
+
+        # do the non-dominated sorting until splitting front
+        fronts = NonDominatedSorting().do(F, n_stop_if_ranked=n_survive)
+
+        for k, front in enumerate(fronts):
+
+            # calculate the crowding distance of the front
+            crowding_of_front = calc_crowding_distance(F[front, :])
+
+            # save rank and crowding in the individual class
+            for j, i in enumerate(front):
+                pop[i].set('rank', k)
+                pop[i].set('crowding', crowding_of_front[j])
+
+            # current front sorted by crowding distance if splitting
+            if len(survivors) + len(front) > n_survive:
+                I = randomized_argsort(crowding_of_front, order='descending', method='numpy')
+                I = I[:(n_survive - len(survivors))]
+
+            # otherwise take the whole front unsorted
+            else:
+                I = np.arange(len(front))
+
+            # extend the survivors by all or selected individuals
+            survivors.extend(front[I])
+        return pop[survivors]
+
+
+def calc_crowding_distance(F):
+    infinity = 1e+14
+
+    n_points = F.shape[0]
+    n_obj = F.shape[1]
+
+    if n_points <= 2:
+        return np.full(n_points, infinity)
+    else:
+
+        # sort each column and get index
+        I = np.argsort(F, axis=0, kind='mergesort')
+
+        # now really sort the whole array
+        F = F[I, np.arange(n_obj)]
+
+        # get the distance to the last element in sorted list and replace zeros with actual values
+        dist = np.concatenate([F, np.full((1, n_obj), np.inf)]) - np.concatenate([np.full((1, n_obj), -np.inf), F])
+
+        index_dist_is_zero = np.where(dist == 0)
+
+        dist_to_last = np.copy(dist)
+        for i, j in zip(*index_dist_is_zero):
+            dist_to_last[i, j] = dist_to_last[i - 1, j]
+
+        dist_to_next = np.copy(dist)
+        for i, j in reversed(list(zip(*index_dist_is_zero))):
+            dist_to_next[i, j] = dist_to_next[i + 1, j]
+
+        # normalize all the distances
+        norm = np.max(F, axis=0) - np.min(F, axis=0)
+        norm[norm == 0] = np.nan
+        dist_to_last, dist_to_next = dist_to_last[:-1] / norm, dist_to_next[1:] / norm
+
+        # if we divided by zero because all values in one columns are equal replace by none
+        dist_to_last[np.isnan(dist_to_last)] = 0.0
+        dist_to_next[np.isnan(dist_to_next)] = 0.0
+
+        # sum up the distance to next and last and norm by objectives - also reorder from sorted list
+        J = np.argsort(I, axis=0)
+        crowding = np.sum(dist_to_last[J, np.arange(n_obj)] + dist_to_next[J, np.arange(n_obj)], axis=1) / n_obj
+
+    # replace infinity with a large number
+    crowding[np.isinf(crowding)] = infinity
+    return crowding
+
+
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser('MOEAD for NAS')
+    # parser = argparse.ArgumentParser('NSGAII for NAS')
     #
     # # hyper-parameters for problem
     # parser.add_argument('--benchmark_name', type=str, default='cifar10',
@@ -1035,119 +1066,79 @@ if __name__ == '__main__':
     # parser.add_argument('--seed', type=int, default=0, help='random seed')
     # parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
     # parser.add_argument('--save', type=int, default=1, help='save log file')
-    # parser.add_argument('--debug', type=int, default=1)
     #
-    # # hyper-parameters for algorithm (MOEAD)
-    # parser.add_argument('--algorithm_name', type=str, default='moead', help='name of algorithm used')
-    # parser.add_argument('--n_points', type=int, default=100)
+    # # hyper-parameters for algorithm (NSGAII)
+    # parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
+    # parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
     # parser.add_argument('--crossover_type', type=str, default='UX')
-    #
-    # parser.add_argument('--using_surrogate_model', type=int, default=0)
-    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
     #
     # parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
     # parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
     # parser.add_argument('--local_search_on_n_points', type=int, default=1)
     # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
     #
+    # parser.add_argument('--using_surrogate_model', type=int, default=0)
+    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
     # args = parser.parse_args()
 
+    # user_input = [[0, 0, 0, 0],
+    #               [1, 0, 1, 0],
+    #               [1, 0, 2, 0],
+    #               [0, 1, 1, 0],
+    #               [0, 1, 2, 0],
+    #               [1, 0, 1, 1],
+    #               [1, 0, 2, 1],
+    #               [0, 1, 1, 1],
+    #               [0, 1, 2, 1]]
+
+    BENCHMARK_NAME = 'SVHN'
+    MIN_FLOPs = 37.442634  # ['I' 'I' 'I' '1' 'I' 'I' 'I' 'I' 'I']
+    MAX_FLOPs = 369.843146
+
     user_input = [[0, 0, 0, 0]]
-                  # [1, 0, 1, 0],
-                  # [1, 0, 2, 0],
-                  # [0, 1, 1, 0],
-                  # [0, 1, 2, 0],
-                  # [1, 0, 1, 1],
-                  # [1, 0, 2, 1],
-                  # [0, 1, 1, 1],
-                  # [0, 1, 2, 1]]
 
-    BENCHMARK_NAME = 'cifar10'
-    if BENCHMARK_NAME == 'nas101':
-        BENCHMARK_API = api.NASBench_()
-        BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+    SAVE = True
+    DEBUG = True
+    MAX_NO_EVALUATIONS = 1000
 
-    elif BENCHMARK_NAME == 'cifar10':
-        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
-
-    else:
-        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
-
-    BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
-    print('--> Load benchmark - Done')
-
-    SAVE = False
-    DEBUG = False
-    MAX_NO_EVALUATIONS = 10000
-
-    ALGORITHM_NAME = 'moead'
-    N_POINTS = 100
+    ALGORITHM_NAME = 'nsga'
+    POP_SIZE = 10
     CROSSOVER_TYPE = 'UX'
 
     USING_SURROGATE_MODEL = False
     UPDATE_MODEL_AFTER_N_GENS = 0
 
     NUMBER_OF_RUNS = 1
-    INIT_SEED = 0
+    SEED = 0
 
     for _input in user_input:
-        # BENCHMARK_NAME = args.benchmark_name
-        # BENCHMARK_DATA = None
-        # BENCHMARK_MIN_MAX = None
-        # BENCHMARK_PF_TRUE = None
-
-        # if BENCHMARK_NAME == 'nas101':
-        #     BENCHMARK_API = api.NASBench_()
-        #     BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
-        #
-        # elif BENCHMARK_NAME == 'cifar10':
-        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
-        #
-        # elif BENCHMARK_NAME == 'cifar100':
-        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
-        #
-        # BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
-        # print('--> Load benchmark - Done')
-        #
         # SAVE = bool(args.save)
-        # DEBUG = bool(args.debug)
+        #
         # MAX_NO_EVALUATIONS = args.max_no_evaluations
         #
         # ALGORITHM_NAME = args.algorithm_name
         #
-        # N_POINTS = args.n_points
+        # POP_SIZE = args.pop_size
         # CROSSOVER_TYPE = args.crossover_type
-
+        #
         # LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
         # LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
         # LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
         # LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
+
+        # USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
+        # UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
+        #
+        # NUMBER_OF_RUNS = args.number_of_runs
+        # INIT_SEED = args.seed
 
         LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
         LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
         LOCAL_SEARCH_ON_N_POINTS = _input[2]
         LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
 
-        # USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
-        # UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
-
-        # NUMBER_OF_RUNS = args.number_of_runs
-        # INIT_SEED = args.seed
-
         now = datetime.now()
-        dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{N_POINTS}_{CROSSOVER_TYPE}_'
+        dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
                                 f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
                                 f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
                                 f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
@@ -1158,42 +1149,31 @@ if __name__ == '__main__':
         os.mkdir(ROOT_PATH)
         print(f'--> Create folder {ROOT_PATH} - Done\n')
 
-        for i_run in range(NUMBER_OF_RUNS):
-            SEED = INIT_SEED + i_run * 100
-            np.random.seed(SEED)
-            torch.random.manual_seed(SEED)
+        np.random.seed(SEED)
+        torch.random.manual_seed(SEED)
 
-            SUB_PATH = ROOT_PATH + f'/{i_run}'
+        # Create new folder (pf_eval) in root folder
+        os.mkdir(ROOT_PATH + '/pf_eval')
+        print(f'--> Create folder {ROOT_PATH}/pf_eval - Done')
 
-            # Create new folder (i_run) in root folder
-            os.mkdir(SUB_PATH)
-            print(f'--> Create folder {SUB_PATH} - Done')
+        # Create new folder (pf_visualize) in root folder
+        os.mkdir(ROOT_PATH + '/pf_visualize')
+        print(f'--> Create folder {ROOT_PATH}/pf_visualize - Done')
 
-            # Create new folder (pf_eval) in 'i_run' folder
-            os.mkdir(SUB_PATH + '/pf_eval')
-            print(f'--> Create folder {SUB_PATH}/pf_eval - Done')
+        net = NSGANet(
+            max_no_evaluations=MAX_NO_EVALUATIONS,
+            pop_size=POP_SIZE,
+            selection=TournamentSelection(func_comp=binary_tournament),
+            survival=RankAndCrowdingSurvival(),
+            crossover_type=CROSSOVER_TYPE,
+            using_surrogate_model=USING_SURROGATE_MODEL,
+            update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+            path=ROOT_PATH)
 
-            # Create new folder (visualize_pf_each_gen) in 'i_run' folder
-            os.mkdir(SUB_PATH + '/visualize_pf_each_gen')
-            print(f'--> Create folder {SUB_PATH}/visualize_pf_each_gen - Done\n')
+        start = timeit.default_timer()
+        net.solve_custom()
+        end = timeit.default_timer()
 
-            INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=N_POINTS).do()
-            net = MOEADNET(
-                max_no_evaluations=MAX_NO_EVALUATIONS,
-                crossover_type=CROSSOVER_TYPE,
-                using_surrogate_model=USING_SURROGATE_MODEL,
-                update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-                path=SUB_PATH,
-                ref_dirs=INIT_REF_DIRS,
-                n_neighbors=10,
-                prob_neighbor_mating=1.0)
+        print(f'--> Took {end - start} seconds.\n')
 
-            start = timeit.default_timer()
-            print(f'--> Experiment {i_run + 1} is running.')
-            net.solve_custom()
-            end = timeit.default_timer()
-
-            print(f'--> The number of runs DONE: {i_run + 1}/{NUMBER_OF_RUNS}')
-            print(f'--> Took {end - start} seconds.\n')
-
-        print(f'All {NUMBER_OF_RUNS} runs - Done\nResults are saved on folder {ROOT_PATH}.')
+        print(f'Results are saved on folder {ROOT_PATH}.\n')
