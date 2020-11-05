@@ -1,26 +1,12 @@
-import numpy as np
+import itertools
 
-np.random.seed(20)
-
-
-def remove_values_from_list(the_list, val):
-    return [value for value in the_list if value != val]
-
-
-allowed = ['1', '2', '3']
-POP_X = np.random.choice(allowed, size=(3 ** 9 * 10, 9), replace=True)
-
-POP_X = np.unique(POP_X, axis=0)
-
-POP_hashX = []
-POP_X_new = []
-for x in POP_X:
-    listX = x.tolist()
-    hashX = ''.join(listX)
-    if hashX not in POP_hashX:
-        POP_hashX.append(hashX)
-        POP_X_new.append(x)
-print(len(POP_X_new))
+stuff = [1, 2]
+count = 0
+for L in range(0, len(stuff)+1):
+    for subset in itertools.combinations(stuff, L):
+        print(subset)
+        count += 1
+print(count)
 
 # X_train, y_train = pk.load(open('training_data.p', 'rb'))
 # print('Load training data - done')

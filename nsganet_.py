@@ -6,10 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pickle as pk
 import timeit
+import tensorflow as tf
 import torch
 
 from acc_predictor.factory import get_acc_predictor
 from datetime import datetime
+
+from keras_preprocessing.image.image_data_generator import ImageDataGenerator
 
 from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
 from pymoo.operators.default_operators import set_if_none
@@ -44,53 +47,82 @@ def encode(X):
     return encode_X
 
 
-def remove_values_from_list(list_x, val):
-    return [value for value in list_x if value != val]
+def insert_to_list_x(x):
+    added = ['|', '|', '|', '|']
+    indices = [4, 7, 10, 14]
+
+    acc = 0
+    for i in range(len(added)):
+        x.insert(indices[i]+acc, added[i])
+        acc += 1
+    return x
 
 
-def create_and_evaluate_model(x):
-    x = remove_values_from_list(x, 'I')
+def convert_X_to_hashX(x):
+    if not isinstance(x, list):
+        x = x.tolist()
+    x = insert_to_list_x(x)
+    x = remove_values_from_list_x(x, 'I')
+    hashX = ''.join(x)
+    return hashX
 
+
+def remove_values_from_list_x(x, val):
+    return [value for value in x if value != val]
+
+
+def create_and_evaluate_model(list_of_layers):
+    """
+
+    :param list_of_layers: hashX
+    :return:
+    """
     keras.backend.clear_session()
+    TF_CONFIG_ = tf.compat.v1.ConfigProto()
+    TF_CONFIG_.gpu_options.per_process_gpu_memory_fraction = 0.9
+    TF_CONFIG_.gpu_options.allow_growth = True
+    sess = tf.compat.v1.Session(config=TF_CONFIG_)
+    keras.backend.set_session(sess)
+
     model = keras.Sequential()
-    model.add(keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(32, 32, 3)))
-
-    if len(x) != 0:
-        if x[0] == '1':
+    model.add(keras.layers.InputLayer(input_shape=(32, 32, 3)))
+    model.add(keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu'))
+    model.add(keras.layers.BatchNormalization())
+    filters = 32
+    for layer in list_of_layers:
+        if layer == '1':
+            model.add(keras.layers.Conv2D(filters, (3, 3), padding='same', activation='relu'))
+        if layer == '2':
+            model.add(keras.layers.Conv2D(filters, (5, 5), padding='same', activation='relu'))
+        if layer == '|':
+            model.add(keras.layers.MaxPooling2D((2, 2)))
+            model.add(keras.layers.Dropout(0.3))
+            filters *= 2
+        else:
             model.add(keras.layers.BatchNormalization())
-            model.add(keras.layers.Conv2D(32, (3, 3), padding='same', activation='relu'))
-        elif x[0] == '2':
-            model.add(keras.layers.BatchNormalization())
-            model.add(keras.layers.Conv2D(32, (5, 5), padding='same', activation='relu'))
-
-        model.add(keras.layers.MaxPooling2D((2, 2)))
-        model.add(keras.layers.Dropout(0.25))
-
-        filters = 64
-
-        for i in range(1, len(x)):
-            if x[i] == '1':
-                model.add(keras.layers.Conv2D(filters, (3, 3), padding='same', activation='relu'))
-            else:
-                model.add(keras.layers.Conv2D(filters, (5, 5), padding='same', activation='relu'))
-            if i % 2 == 0:
-                model.add(keras.layers.MaxPooling2D((2, 2)))
-                model.add(keras.layers.Dropout(0.25))
-                filters *= 2
-            else:
-                model.add(keras.layers.BatchNormalization())
 
     model.add(keras.layers.Flatten())
-    model.add(keras.layers.Dense(1024, activation='relu'))
+    model.add(keras.layers.Dense(filters, activation='relu'))
     model.add(keras.layers.Dropout(0.4))
     model.add(keras.layers.Dense(10, activation='softmax'))
 
+    early_stopping = keras.callbacks.EarlyStopping(patience=8)
+    optimizer = keras.optimizers.Adam()
+
+    model.compile(optimizer=optimizer,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    # Fit model in order to make predictions
+    history = model.fit_generator(generator=data.flow(X_train, y_train, batch_size=128),
+                                  epochs=2,
+                                  validation_data=(X_val, y_val), callbacks=[early_stopping])
+    # _, test_acc = model.evaluate(x=X_test, y=y_test, verbose=0)
     _, layer_flops, _, _ = kerop.profile(model)
 
-    val_acc = (sum(layer_flops) / 1e9) + np.random.uniform(0, 0.5)
     FLOPs = sum(layer_flops) / 1e6  # --> or test_acc
 
-    return FLOPs, val_acc
+    return FLOPs, max(history.history['val_accuracy'])
 
 
 class NSGANet(GeneticAlgorithm):
@@ -112,10 +144,11 @@ class NSGANet(GeneticAlgorithm):
         self.func_display_attrs = disp_multi_objective
 
         ''' Custom '''
+        self.data = dict()
+
         self.crossover_type = crossover_type
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
 
-        self.dpfs = []
         self.no_eval = []
 
         self.max_no_evaluations = max_no_evaluations
@@ -128,28 +161,36 @@ class NSGANet(GeneticAlgorithm):
         self.no_evaluations = 0
         self.path = path
 
-    def true_evaluate(self, X, count_n_evaluations=True):
-        if len(X.shape) == 1:
+    def true_evaluate(self, X, single=False, count_n_evaluations=True):
+        if single:
             F = np.full(2, fill_value=np.nan)
 
             FLOPs, val_acc = create_and_evaluate_model(X)
-            if FLOPs < MIN_FLOPs or FLOPs > MAX_FLOPs:
-                print(X, FLOPs)
-            F[0] = (FLOPs - MIN_FLOPs) / (MAX_FLOPs - MIN_FLOPs)
-            F[1] = 1 - val_acc
+            print(X, FLOPs, val_acc)
+            try:
+                self.data[X].append(val_acc)
+            except KeyError:
+                self.data[X] = [val_acc]
+
+            F[0] = FLOPs
+            F[1] = 1 - sum(self.data[X]) / len(self.data[X])
 
             if count_n_evaluations:
                 self.no_evaluations += 1
 
         else:
-            F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
-            for i in range(X.shape[0]):
+            F = np.full(shape=(len(X), 2), fill_value=np.nan)
+            for i in range(len(X)):
                 FLOPs, val_acc = create_and_evaluate_model(X[i])
 
-                F[i][0] = (FLOPs - MIN_FLOPs) / (MAX_FLOPs - MIN_FLOPs)
-                if FLOPs < MIN_FLOPs or FLOPs > MAX_FLOPs:
-                    print(X[i], FLOPs)
-                F[i][1] = 1 - val_acc
+                try:
+                    self.data[X[i]].append(val_acc)
+                except KeyError:
+                    self.data[X[i]] = [val_acc]
+                print(X[i], FLOPs, val_acc)
+
+                F[i][0] = FLOPs
+                F[i][1] = 1 - sum(self.data[X[i]]) / len(self.data[X[i]])
 
                 if count_n_evaluations:
                     self.no_evaluations += 1
@@ -194,9 +235,8 @@ class NSGANet(GeneticAlgorithm):
         allowed_choices = ['I', '1', '2']
 
         while len(pop_X) < n_samples:
-            new_X = np.random.choice(allowed_choices, 9)
-            new_listX = remove_values_from_list(new_X.tolist(), 'I')
-            new_hashX = ''.join(new_listX)
+            new_X = np.random.choice(allowed_choices, 13)
+            new_hashX = convert_X_to_hashX(new_X)
             if new_hashX not in pop_hashX:
                 pop_X.append(new_X)
                 pop_hashX.append(new_hashX)
@@ -243,11 +283,8 @@ class NSGANet(GeneticAlgorithm):
                 else:
                     raise ValueError('Crossover method is not available!')
 
-                tmp_offspring1_listX = remove_values_from_list(tmp_offspring1_X.tolist(), 'I')
-                tmp_offspring2_listX = remove_values_from_list(tmp_offspring2_X.tolist(), 'I')
-
-                tmp_offspring1_hashX = ''.join(tmp_offspring1_listX)
-                tmp_offspring2_hashX = ''.join(tmp_offspring2_listX)
+                tmp_offspring1_hashX = convert_X_to_hashX(tmp_offspring1_X)
+                tmp_offspring2_hashX = convert_X_to_hashX(tmp_offspring2_X)
 
                 if n_crossovers <= 100:
                     if tmp_offspring1_hashX not in offsprings_hashX:
@@ -305,8 +342,7 @@ class NSGANet(GeneticAlgorithm):
 
                         tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
 
-                tmp_new_offspring_listX = remove_values_from_list(tmp_new_offspring_X.tolist(), 'I')
-                tmp_new_offspring_hashX = ''.join(tmp_new_offspring_listX)
+                tmp_new_offspring_hashX = convert_X_to_hashX(tmp_new_offspring_X)
 
                 if n_mutations <= 100:
                     if (tmp_new_offspring_hashX not in new_offsprings_hashX) and \
@@ -331,7 +367,7 @@ class NSGANet(GeneticAlgorithm):
     def _initialize_custom(self):
         pop = self._sampling(self.pop_size)
 
-        pop_F = self.true_evaluate(X=pop.get('X'))
+        pop_F = self.true_evaluate(X=pop.get('hashX'))
         pop.set('F', pop_F)
         # if self.using_surrogate_model:
         #     self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
@@ -718,7 +754,7 @@ class NSGANet(GeneticAlgorithm):
         #     self.models_for_training.extend(offsprings.get('X').tolist())
         #     offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
         # else:
-        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('hashX'))
         offsprings.set('F', offsprings_true_F)
 
         # update elitist archive - crossover
@@ -745,7 +781,7 @@ class NSGANet(GeneticAlgorithm):
         #     self.models_for_training.extend(offsprings.get('X').tolist())
         #     offsprings_true_F = self.true_evaluate(X=offsprings.get('X'), count_n_evaluations=False)
         # else:
-        offsprings_true_F = self.true_evaluate(X=offsprings.get('X'))
+        offsprings_true_F = self.true_evaluate(X=offsprings.get('hashX'))
         offsprings.set('F', offsprings_true_F)
 
         # update elitist archive - mutation
@@ -864,6 +900,7 @@ class NSGANet(GeneticAlgorithm):
         # initialize
         self.pop = self._initialize_custom()
         print('-> initialize - done')
+
         # update elitist archive - initialize
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
             update_elitist_archive(self.pop.get('X'), self.pop.get('hashX'), self.pop.get('F'),
@@ -883,23 +920,23 @@ class NSGANet(GeneticAlgorithm):
         return
 
     def _do_each_gen(self):
-        if self.using_surrogate_model \
-                and (self.max_no_evaluations - self.no_evaluations > self.max_no_evaluations // 3) \
-                and (self.n_gen % self.update_model_after_n_gens == 0):
-
-            if len(self.models_for_training) < 500:
-                x = np.array(self.models_for_training)
-                self.models_for_training = []
-            else:
-                idxs = random.perm(len(self.models_for_training))
-                x = np.array(self.models_for_training)[idxs[:500]]
-                self.models_for_training = np.array(self.models_for_training)[idxs[500:]].tolist()
-
-            y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
-            self.surrogate_model.fit(x=encode(x), y=y)
-
-            if DEBUG:
-                print('Update surrogate model - Done')
+        # if self.using_surrogate_model \
+        #         and (self.max_no_evaluations - self.no_evaluations > self.max_no_evaluations // 3) \
+        #         and (self.n_gen % self.update_model_after_n_gens == 0):
+        #
+        #     if len(self.models_for_training) < 500:
+        #         x = np.array(self.models_for_training)
+        #         self.models_for_training = []
+        #     else:
+        #         idxs = random.perm(len(self.models_for_training))
+        #         x = np.array(self.models_for_training)[idxs[:500]]
+        #         self.models_for_training = np.array(self.models_for_training)[idxs[500:]].tolist()
+        #
+        #     y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
+        #     self.surrogate_model.fit(x=encode(x), y=y)
+        #
+        #     if DEBUG:
+        #         print('Update surrogate model - Done')
 
         if DEBUG:
             print(f'Number of evaluations used: {self.no_evaluations}/{self.max_no_evaluations}')
@@ -911,7 +948,7 @@ class NSGANet(GeneticAlgorithm):
 
             plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='blue', s=15,
                         label='elitist archive')
-            plt.xlabel('FLOPs (normalize)')
+            plt.xlabel('FLOPs')
             plt.ylabel('validation error')
             plt.legend()
             plt.grid()
@@ -920,8 +957,11 @@ class NSGANet(GeneticAlgorithm):
 
     def _finalize(self):
         if SAVE:
+            pk.dump(self.data, open(f'{self.path}/data.p', 'wb'))
+            pk.dump([self.elitist_archive_hashX, self.elitist_archive_F], open(f'{self.path}/elitist_archive.p', 'wb'))
+
             # visualize elitist archive
-            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='red', s=15,
+            plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='blue', s=15,
                         label='elitist archive')
             plt.xlabel('FLOPs (normalize)')
             plt.ylabel('validation error')
@@ -1055,125 +1095,101 @@ def calc_crowding_distance(F):
 
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser('NSGAII for NAS')
-    #
-    # # hyper-parameters for problem
-    # parser.add_argument('--benchmark_name', type=str, default='cifar10',
-    #                     help='the benchmark used for optimizing')
-    # parser.add_argument('--max_no_evaluations', type=int, default=10000)
-    #
-    # # hyper-parameters for main
-    # parser.add_argument('--seed', type=int, default=0, help='random seed')
-    # parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
-    # parser.add_argument('--save', type=int, default=1, help='save log file')
-    #
-    # # hyper-parameters for algorithm (NSGAII)
-    # parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
-    # parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
-    # parser.add_argument('--crossover_type', type=str, default='UX')
-    #
-    # parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
-    # parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
-    # parser.add_argument('--local_search_on_n_points', type=int, default=1)
-    # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
-    #
-    # parser.add_argument('--using_surrogate_model', type=int, default=0)
-    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser('NSGAII for NAS')
 
-    # user_input = [[0, 0, 0, 0],
-    #               [1, 0, 1, 0],
-    #               [1, 0, 2, 0],
-    #               [0, 1, 1, 0],
-    #               [0, 1, 2, 0],
-    #               [1, 0, 1, 1],
-    #               [1, 0, 2, 1],
-    #               [0, 1, 1, 1],
-    #               [0, 1, 2, 1]]
+    # hyper-parameters for problem
+    parser.add_argument('--max_no_evaluations', type=int, default=10000)
+
+    # hyper-parameters for main
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
+    parser.add_argument('--save', type=int, default=1, help='save log file')
+
+    # hyper-parameters for algorithm (NSGAII)
+    parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
+    parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
+    parser.add_argument('--crossover_type', type=str, default='UX')
+
+    parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
+    parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
+    parser.add_argument('--local_search_on_n_points', type=int, default=1)
+    parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
+
+    parser.add_argument('--using_surrogate_model', type=int, default=0)
+    parser.add_argument('--update_model_after_n_gens', type=int, default=10)
+    args = parser.parse_args()
 
     BENCHMARK_NAME = 'SVHN'
-    MIN_FLOPs = 37.442634  # ['I' 'I' 'I' '1' 'I' 'I' 'I' 'I' 'I']
-    MAX_FLOPs = 369.843146
 
-    user_input = [[0, 0, 0, 0]]
+    X_train, y_train = pk.load(open('SVHN_dataset/training_data.p', 'rb'))
+    print('Load training data - done')
+    X_val, y_val = pk.load(open('SVHN_dataset/validating_data.p', 'rb'))
+    print('Load validation data - done')
+    X_test, y_test = pk.load(open('SVHN_dataset/testing_data.p', 'rb'))
+    print('Load testing data - done')
 
-    SAVE = True
     DEBUG = True
-    MAX_NO_EVALUATIONS = 1000
 
-    ALGORITHM_NAME = 'nsga'
-    POP_SIZE = 10
-    CROSSOVER_TYPE = 'UX'
+    SAVE = bool(args.save)
 
-    USING_SURROGATE_MODEL = False
-    UPDATE_MODEL_AFTER_N_GENS = 0
+    MAX_NO_EVALUATIONS = args.max_no_evaluations
 
-    NUMBER_OF_RUNS = 1
-    SEED = 0
+    ALGORITHM_NAME = args.algorithm_name
 
-    for _input in user_input:
-        # SAVE = bool(args.save)
-        #
-        # MAX_NO_EVALUATIONS = args.max_no_evaluations
-        #
-        # ALGORITHM_NAME = args.algorithm_name
-        #
-        # POP_SIZE = args.pop_size
-        # CROSSOVER_TYPE = args.crossover_type
-        #
-        # LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
-        # LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
-        # LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
-        # LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
+    POP_SIZE = args.pop_size
+    CROSSOVER_TYPE = args.crossover_type
 
-        # USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
-        # UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
-        #
-        # NUMBER_OF_RUNS = args.number_of_runs
-        # INIT_SEED = args.seed
+    LOCAL_SEARCH_ON_PARETO_FRONT = bool(args.local_search_on_pf)
+    LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
+    LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
+    LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
 
-        LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
-        LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
-        LOCAL_SEARCH_ON_N_POINTS = _input[2]
-        LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
+    USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
+    UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
 
-        now = datetime.now()
-        dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
-                                f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
-                                f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
-                                f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
-                                f'd%d_m%m_H%H_M%M')
-        ROOT_PATH = dir_name
+    SEED = args.seed
 
-        # Create root folder
-        os.mkdir(ROOT_PATH)
-        print(f'--> Create folder {ROOT_PATH} - Done\n')
+    data = ImageDataGenerator(rotation_range=8,
+                              zoom_range=[0.95, 1.05],
+                              height_shift_range=0.10,
+                              shear_range=0.15)
 
-        np.random.seed(SEED)
-        torch.random.manual_seed(SEED)
+    now = datetime.now()
+    dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
+                            f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
+                            f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
+                            f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
+                            f'd%d_m%m_H%H_M%M')
+    ROOT_PATH = dir_name
 
-        # Create new folder (pf_eval) in root folder
-        os.mkdir(ROOT_PATH + '/pf_eval')
-        print(f'--> Create folder {ROOT_PATH}/pf_eval - Done')
+    # Create root folder
+    os.mkdir(ROOT_PATH)
+    print(f'--> Create folder {ROOT_PATH} - Done\n')
 
-        # Create new folder (pf_visualize) in root folder
-        os.mkdir(ROOT_PATH + '/pf_visualize')
-        print(f'--> Create folder {ROOT_PATH}/pf_visualize - Done')
+    np.random.seed(SEED)
+    torch.random.manual_seed(SEED)
 
-        net = NSGANet(
-            max_no_evaluations=MAX_NO_EVALUATIONS,
-            pop_size=POP_SIZE,
-            selection=TournamentSelection(func_comp=binary_tournament),
-            survival=RankAndCrowdingSurvival(),
-            crossover_type=CROSSOVER_TYPE,
-            using_surrogate_model=USING_SURROGATE_MODEL,
-            update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-            path=ROOT_PATH)
+    # Create new folder (pf_eval) in root folder
+    os.mkdir(ROOT_PATH + '/pf_eval')
+    print(f'--> Create folder {ROOT_PATH}/pf_eval - Done')
 
-        start = timeit.default_timer()
-        net.solve_custom()
-        end = timeit.default_timer()
+    # Create new folder (pf_visualize) in root folder
+    os.mkdir(ROOT_PATH + '/pf_visualize')
+    print(f'--> Create folder {ROOT_PATH}/pf_visualize - Done')
 
-        print(f'--> Took {end - start} seconds.\n')
+    net = NSGANet(
+        max_no_evaluations=MAX_NO_EVALUATIONS,
+        pop_size=POP_SIZE,
+        selection=TournamentSelection(func_comp=binary_tournament),
+        survival=RankAndCrowdingSurvival(),
+        crossover_type=CROSSOVER_TYPE,
+        using_surrogate_model=USING_SURROGATE_MODEL,
+        update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+        path=ROOT_PATH)
 
-        print(f'Results are saved on folder {ROOT_PATH}.\n')
+    start = timeit.default_timer()
+    net.solve_custom()
+    end = timeit.default_timer()
+
+    print(f'--> Took {end - start} seconds.\n')
+
+    print(f'Results are saved on folder {ROOT_PATH}.\n')
