@@ -957,8 +957,8 @@ class NSGANet(GeneticAlgorithm):
 
     def _finalize(self):
         if SAVE:
-            pk.dump(self.data, open(f'{self.path}/data.p', 'wb'))
             pk.dump([self.elitist_archive_hashX, self.elitist_archive_F], open(f'{self.path}/elitist_archive.p', 'wb'))
+            pk.dump(self.data, open(f'{self.path}/data.p', 'wb'))
 
             # visualize elitist archive
             plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='blue', s=15,
