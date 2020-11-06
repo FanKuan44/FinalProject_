@@ -7,7 +7,7 @@ import numpy as np
 import pickle as pk
 import timeit
 import tensorflow as tf
-import torch
+# import torch
 
 from acc_predictor.factory import get_acc_predictor
 from datetime import datetime
@@ -115,12 +115,12 @@ def create_and_evaluate_model(list_of_layers):
 
     # Fit model in order to make predictions
     history = model.fit_generator(generator=data.flow(X_train, y_train, batch_size=128),
-                                  epochs=2,
+                                  epochs=N_EPOCHS,
                                   validation_data=(X_val, y_val), callbacks=[early_stopping])
     # _, test_acc = model.evaluate(x=X_test, y=y_test, verbose=0)
     _, layer_flops, _, _ = kerop.profile(model)
 
-    FLOPs = sum(layer_flops) / 1e6  # --> or test_acc
+    FLOPs = sum(layer_flops) / 1e6
 
     return FLOPs, max(history.history['val_accuracy'])
 
@@ -143,7 +143,7 @@ class NSGANet(GeneticAlgorithm):
         self.tournament_type = 'comp_by_dom_and_crowding'
         self.func_display_attrs = disp_multi_objective
 
-        ''' Custom '''
+        ''' Customize '''
         self.data = dict()
 
         self.crossover_type = crossover_type
@@ -166,7 +166,6 @@ class NSGANet(GeneticAlgorithm):
             F = np.full(2, fill_value=np.nan)
 
             FLOPs, val_acc = create_and_evaluate_model(X)
-            print(X, FLOPs, val_acc)
             try:
                 self.data[X].append(val_acc)
             except KeyError:
@@ -187,7 +186,6 @@ class NSGANet(GeneticAlgorithm):
                     self.data[X[i]].append(val_acc)
                 except KeyError:
                     self.data[X[i]] = [val_acc]
-                print(X[i], FLOPs, val_acc)
 
                 F[i][0] = FLOPs
                 F[i][1] = 1 - sum(self.data[X[i]]) / len(self.data[X[i]])
@@ -391,58 +389,47 @@ class NSGANet(GeneticAlgorithm):
         if ls_on_knee_solutions:
             first, last = len(x_old_X) - 2, len(x_old_X) - 1
 
-        stop_iter = 14
+        max_true_n_searches = 14
 
         if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
+                true_n_searches = 0
                 checked = [x_old_hashX[i]]
-                j = 0
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        idx = np.random.randint(0, 14)
-                        ops = ['I', '1', '2']
-                        ops.remove(x_old_X[i][idx])
-                    else:
-                        idx = np.random.randint(1, 6)
-                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
+                tmp_max_n_searches = 100  # Using for avoiding stuck
+                tmp_n_searches = 0  # Using for avoiding stuck
+
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < tmp_max_n_searches):
+                    tmp_n_searches += 1
+
+                    idx = np.random.randint(0, 13)
+                    ops = ['I', '1', '2']
+                    ops.remove(x_old_X[i][idx])
+
                     new_op = np.random.choice(ops)
 
                     x_new_X = x_old_X[i].copy()
-
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        x_new_X[idx] = new_op
-
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx] = new_op
-
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                    x_new_X[idx] = new_op
+                    x_new_hashX = convert_X_to_hashX(x_new_X)
 
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
                         checked.append(x_new_hashX)
-                        j += 1
+                        true_n_searches += 1
 
                         true_x_new_F = None
-                        if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
-                            if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-                            elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-
-                            self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
-                        else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                        # if self.using_surrogate_model:
+                        #     x_new_F = self.fake_evaluate(x_new_X)
+                        #     if BENCHMARK_NAME == 'cifar10':
+                        #         if x_new_F[1] < 0.085:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #     elif BENCHMARK_NAME == 'cifar100':
+                        #         if x_new_F[1] < 0.305:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #
+                        #     self.models_for_training.append(x_new_X)
+                        #     true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                        # else:
+                        x_new_F = self.true_evaluate(x_new_hashX, single=True)
 
                         if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                             better_idv = find_better_idv(x_new_F, x_old_F[i], 'first')
@@ -471,58 +458,44 @@ class NSGANet(GeneticAlgorithm):
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
             for i in range(len(x_old_X)):
-
-                max_n_searching = 100
-                n_searching = 0
+                true_n_searches = 0
                 checked = [x_old_hashX[i]]
-                j = 0
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        idx = np.random.choice(14, size=2, replace=False)
-                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
-                        ops1.remove(x_old_X[i][idx[0]])
-                        ops2.remove(x_old_X[i][idx[1]])
-                    else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
+                tmp_max_n_searches = 100  # Using for avoiding stuck
+                tmp_n_searches = 0  # Using for avoiding stuck
+
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < tmp_max_n_searches):
+                    tmp_n_searches += 1
+
+                    idxs = np.random.choice(13, size=2, replace=False)
+                    ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+                    ops1.remove(x_old_X[i][idxs[0]])
+                    ops2.remove(x_old_X[i][idxs[1]])
 
                     new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
 
                     x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
-
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
-
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(module)
+                    x_new_X[idxs[0]], x_new_X[idxs[1]] = new_op1, new_op2
+                    x_new_hashX = convert_X_to_hashX(x_new_X)
 
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        j += 1
+                        true_n_searches += 1
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
-                        if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
-                            if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-                            elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-
-                            self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
-                        else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                        # if self.using_surrogate_model:
+                        #     x_new_F = self.fake_evaluate(x_new_X)
+                        #     if BENCHMARK_NAME == 'cifar10':
+                        #         if x_new_F[1] < 0.085:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #     elif BENCHMARK_NAME == 'cifar100':
+                        #         if x_new_F[1] < 0.305:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #
+                        #     self.models_for_training.append(x_new_X)
+                        #     true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                        # else:
+                        x_new_F = self.true_evaluate(x_new_hashX, single=True)
 
                         if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                             better_idv = find_better_idv(x_new_F, x_old_F[i], 'first')
@@ -567,57 +540,51 @@ class NSGANet(GeneticAlgorithm):
 
         non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
 
-        stop_iter = 14
+        max_true_n_searches = 14
 
         if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
                 checked = [x_old_hashX[i]]
-                j = 0
+                true_n_searches = 0
+
+                tmp_max_n_searches = 100  # Using for avoiding stuck
+                tmp_n_searches = 0  # Using for avoiding stuck
+
                 alpha = np.random.rand()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        idx = np.random.randint(0, 14)
-                        ops = ['I', '1', '2']
-                        ops.remove(x_old_X[i][idx])
-                    else:
-                        idx = np.random.randint(1, 6)
-                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < tmp_max_n_searches):
+                    tmp_n_searches += 1
+
+                    idx = np.random.randint(0, 13)
+                    ops = ['I', '1', '2']
+                    ops.remove(x_old_X[i][idx])
+
                     new_op = np.random.choice(ops)
 
                     x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        x_new_X[idx] = new_op
+                    x_new_X[idx] = new_op
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx] = new_op
-
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                    x_new_hashX = convert_X_to_hashX(x_new_X)
 
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        true_n_searches += 1
+
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
-                        if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
-                            if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-                            elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-
-                            self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
-                        else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                        # if self.using_surrogate_model:
+                        #     x_new_F = self.fake_evaluate(x_new_X)
+                        #     if BENCHMARK_NAME == 'cifar10':
+                        #         if x_new_F[1] < 0.085:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #     elif BENCHMARK_NAME == 'cifar100':
+                        #         if x_new_F[1] < 0.305:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #
+                        #     self.models_for_training.append(x_new_X)
+                        #     true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                        # else:
+                        x_new_F = self.true_evaluate(x_new_hashX, single=True)
 
                         better_idv = find_better_idv(f1=x_new_F, f2=x_old_F[i])
 
@@ -642,61 +609,50 @@ class NSGANet(GeneticAlgorithm):
                                     non_dominance_F.append(true_x_new_F)
                                 else:
                                     non_dominance_F.append(x_new_F)
-                        j += 1
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
                 checked = [x_old_hashX[i]]
-                j = 0
+                true_n_searches = 0
+
+                tmp_max_n_searches = 100  # Using for avoiding stuck
+                tmp_n_searches = 0  # Using for avoiding stuck
+
                 alpha = np.random.rand()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        idx = np.random.choice(14, size=2, replace=False)
-                        ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
-                        ops1.remove(x_old_X[i][idx[0]])
-                        ops2.remove(x_old_X[i][idx[1]])
-                    else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < tmp_max_n_searches):
+                    tmp_n_searches += 1
+
+                    idxs = np.random.choice(13, size=2, replace=False)
+                    ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
+                    ops1.remove(x_old_X[i][idxs[0]])
+                    ops2.remove(x_old_X[i][idxs[1]])
 
                     new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
 
                     x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
-
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
-
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                    x_new_X[idxs[0]], x_new_X[idxs[1]] = new_op1, new_op2
+                    x_new_hashX = convert_X_to_hashX(x_new_X)
 
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        true_n_searches += 1
+
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
-                        if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
-                            if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-                            elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
-
-                            self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
-                        else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                        # if self.using_surrogate_model:
+                        #     x_new_F = self.fake_evaluate(x_new_X)
+                        #     if BENCHMARK_NAME == 'cifar10':
+                        #         if x_new_F[1] < 0.085:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #     elif BENCHMARK_NAME == 'cifar100':
+                        #         if x_new_F[1] < 0.305:
+                        #             x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                        #
+                        #     self.models_for_training.append(x_new_X)
+                        #     true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                        # else:
+                        x_new_F = self.true_evaluate(x_new_hashX, single=True)
 
                         better_idv = find_better_idv(f1=x_new_F, f2=x_old_F[i])
 
@@ -721,7 +677,6 @@ class NSGANet(GeneticAlgorithm):
                                     non_dominance_F.append(true_x_new_F)
                                 else:
                                     non_dominance_F.append(x_new_F)
-                        j += 1
 
         non_dominance_X = np.array(non_dominance_X)
         non_dominance_hashX = np.array(non_dominance_hashX)
@@ -963,7 +918,7 @@ class NSGANet(GeneticAlgorithm):
             # visualize elitist archive
             plt.scatter(self.elitist_archive_F[:, 0], self.elitist_archive_F[:, 1], c='blue', s=15,
                         label='elitist archive')
-            plt.xlabel('FLOPs (normalize)')
+            plt.xlabel('FLOPs')
             plt.ylabel('validation error')
             plt.legend()
             plt.grid()
@@ -1099,6 +1054,7 @@ if __name__ == '__main__':
 
     # hyper-parameters for problem
     parser.add_argument('--max_no_evaluations', type=int, default=10000)
+    parser.add_argument('--n_epochs', type=int, default=1)
 
     # hyper-parameters for main
     parser.add_argument('--seed', type=int, default=0, help='random seed')
@@ -1132,6 +1088,7 @@ if __name__ == '__main__':
     SAVE = bool(args.save)
 
     MAX_NO_EVALUATIONS = args.max_no_evaluations
+    N_EPOCHS = args.n_epochs
 
     ALGORITHM_NAME = args.algorithm_name
 
@@ -1166,7 +1123,7 @@ if __name__ == '__main__':
     print(f'--> Create folder {ROOT_PATH} - Done\n')
 
     np.random.seed(SEED)
-    torch.random.manual_seed(SEED)
+    # torch.random.manual_seed(SEED)
 
     # Create new folder (pf_eval) in root folder
     os.mkdir(ROOT_PATH + '/pf_eval')
