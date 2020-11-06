@@ -2,7 +2,16 @@ import copy
 import torch
 import numpy as np
 import torch.nn as nn
-from utils import get_correlation
+
+
+def get_correlation(prediction, target):
+    import scipy.stats as stats
+
+    rmse = np.sqrt(((prediction - target) ** 2).mean())
+    rho, _ = stats.spearmanr(prediction, target)
+    tau, _ = stats.kendalltau(prediction, target)
+
+    return rmse, rho, tau
 
 
 class Net(nn.Module):
