@@ -249,8 +249,19 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
+        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA (original) (max no.evaluations: 3e4)'
+        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
+                     f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
+        else:
+            label_ = label
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
-                     axis_labels=axis_lbs, label=label, legend=True)
+                     axis_labels=axis_lbs, label=label_, legend=True)
 
     plt.grid()
     if log_x:
@@ -258,7 +269,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     if log_y:
         plt.yscale('log')
     title = paths[-1].split('_')[0].split('/')[-1]
-    plt.title(title)
+    plt.title(title + ' - pop size: 100')
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
@@ -402,17 +413,27 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     axis_lbs = ['No.Evaluations', 'Hypervolume']
 
     for i in range(len(paths)):
-        # pickle.dump([no_eval_avg_each_path[i], hp_avg_each_path[i]], open(f'{paths[i]}_hp.p', 'wb'))
         label = paths[i].split('_')[1:-4]
+        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA (original) (max no.evaluations: 3e4)'
+        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
+                     f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
+        else:
+            label_ = label
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
-                     axis_labels=axis_lbs, label=label, legend=True)
+                     axis_labels=axis_lbs, label=label_, legend=True)
     if log_x:
         plt.xscale('log')
     if log_y:
         plt.yscale('log')
     plt.grid()
     title = paths[-1].split('_')[0].split('/')[-1]
-    plt.title(title)
+    plt.title(title + ' - pop size: 100')
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'hp_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)

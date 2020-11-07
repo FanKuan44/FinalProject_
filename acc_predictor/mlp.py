@@ -59,7 +59,7 @@ class MLP:
         return predict(self.model, test_data, device=device)
 
 
-def train(net, x, y, trn_split=0.8, pretrained=None, device='cpu',
+def train(net, x, y, trn_split=0.8, pretrained=None, device='cuda',
           lr=8e-4, epochs=2000, verbose=False):
 
     n_samples = x.shape[0]
@@ -107,7 +107,7 @@ def train(net, x, y, trn_split=0.8, pretrained=None, device='cpu',
 
     validate(best_net, inputs, target, device=device)
 
-    return best_net.to('cpu')
+    return best_net.to('cuda')
 
 
 def train_one_epoch(net, data, target, criterion, optimizer, device):
