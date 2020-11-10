@@ -1,22 +1,13 @@
 def find_better_idv(f1, f2, position=None):
     """
-    Kiem tra xem ca the nao tot hon.
-    Neu ca the do nam o vi tri dau hoac cuoi thi chi xet 1 trong 2 fitness value, con lai thi xet binh thuong.
-    =========================================================================================================
+    - Find the better individual between two individuals input.\n
+    - If the individual has the highest f1 or f2, just check value f1 or f2 to find better individual.
 
-    Parameters:
-    ----------
-    :param f1: fitness value of first individual
-    :param f2: fitness value of second individual
-    :param position: position of individual in pareto front or set of knee solutions (first, last, none)
-    =========================================================================================================
+    :param f1: fitness value of the first individual
+    :param f2: fitness value of the second individual
+    :param position: position of the individual in pareto front or set of knee solutions (first, last, none)
 
-    Returns:
-    ------
-    :return:
-    1: individual 1
-    2: individual 2
-    0: non-dominated
+    :return: 0: non-dominated || 1: individual 1 || 2: individual 2
     """
     if position is None:
         if (f1[0] <= f2[0] and f1[1] < f2[1]) or (f1[0] < f2[0] and f1[1] <= f2[1]):
@@ -38,21 +29,14 @@ def find_better_idv(f1, f2, position=None):
 
 def find_better_idv_bosman_ver(alpha, f1, f2):
     """
-    Kiem tra xem ca the nao tot hon theo paper cua Bosman.
-    Ngau nhien 1 gia tri alpha, tinh lai fitness value cua tung individual theo alpha va so sanh.
-    =========================================================================================================
+    - Find the better individual between two individuals input (followed Bosman's paper).
+    https://arxiv.org/pdf/2004.08996.pdf
 
-    Parameters:
-    -----------
     :param alpha: value of alpha
     :param f1: the old fitness value of first individual
     :param f2: the old fitness value of first individual
-    =========================================================================================================
 
-    Returns:
-    :return:
-    1: individual 1
-    2: individual 2
+    :return: 1: individual 1 || 2: individual 2
     """
     f1_new = alpha * f1[0] + (1 - alpha) * f1[1]
     f2_new = alpha * f2[0] + (1 - alpha) * f2[1]

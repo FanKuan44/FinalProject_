@@ -1,49 +1,3 @@
-# INPUT = 'input'
-# OUTPUT = 'output'
-# CONV3X3 = 'conv3x3-bn-relu'
-# CONV1X1 = 'conv1x1-bn-relu'
-# MAXPOOL3X3 = 'maxpool3x3'
-#
-# from nasbench import api
-#
-# # Use nasbench_full.tfrecord for full dataset (run download command above).
-# nasbench = api.NASBench('C:/Users/ADMIN/Desktop/nsga-net-master/nasbench/nasbench_only108.tfrecord')
-# cell = api.ModelSpec(
-#   matrix=[[0, 1, 1, 1, 0, 1, 0],    # input layer
-#           [0, 0, 0, 0, 0, 0, 1],    # 1x1 conv
-#           [0, 0, 0, 0, 0, 0, 1],    # 3x3 conv
-#           [0, 0, 0, 0, 1, 0, 0],    # 5x5 conv (replaced by two 3x3's)
-#           [0, 0, 0, 0, 0, 0, 1],    # 5x5 conv (replaced by two 3x3's)
-#           [0, 0, 0, 0, 0, 0, 1],    # 3x3 max-pool
-#           [0, 0, 0, 0, 0, 0, 0]],   # output layer
-#   # Operations at the vertices of the module, matches order of matrix.
-#   ops=[INPUT, CONV1X1, CONV3X3, CONV3X3, CONV3X3, MAXPOOL3X3, OUTPUT])
-#
-# # Querying multiple times may yield different results. Each cell is evaluated 3
-# # times at each epoch budget and querying will sample one randomly.
-# data = nasbench.query(cell)
-
-
-""" Find the solutions whose rank equal 0 """
-# f_value = np.array(pickle.load(open('f_value.p', 'rb')))
-# f_value[:, 0] = 1 - f_value[:, 0]
-# print("LOAD DATA DONE!!")
-# rank = np.zeros(len(f_value))
-# for i in range(len(f_value) - 1):
-#     if rank[i] == 0:
-#         for j in range(i + 1, len(f_value)):
-#             better = check_better(f_value[i], f_value[j])
-#             if better == 'obj1':
-#                 rank[j] += 1
-#             elif better == 'obj2':
-#                 rank[i] += 1
-#                 break
-# pareto_front = []
-# for i in range(len(rank)):
-#     if rank[i] == 0:
-#         pareto_front.append(f_value[i])
-#         print(f_value[i])
-
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -62,136 +16,136 @@ def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x
         place_to_plot.legend()
 
 
-""" ------------------- Visualize "Pareto Front Approximate" -----------------------"""
+# """ ------------------- Visualize "Pareto Front Approximate" -----------------------"""
+#
+#
+# def get_pfs(path, visualize_all=False):
+#     pfs_lst = []
+#     if visualize_all:
+#         number_of_pfs_to_visualize = len(os.listdir(path))
+#     else:
+#         number_of_pfs_to_visualize = 1
+#     for number_of_file in range(number_of_pfs_to_visualize):
+#         path_ = path + f'/{number_of_file}/pf_eval'
+#         pf_and_eval_folder = os.listdir(path_)
+#
+#         # Sort files by name
+#         pf_and_eval_folder = sorted(pf_and_eval_folder, key=lambda x: int(x.split('_')[-1][:-2]))
+#
+#         pf, _ = pickle.load(open(path_ + '/' + pf_and_eval_folder[-1], 'rb'))
+#         pfs_lst.append(pf)
+#     return pfs_lst
+#
+#
+# def visualize_pf(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), color='blue', legend=False,
+#                  visualize_pf_true=False, marker='.', size=10):
+#     if visualize_pf_true:
+#         pareto_front_true = np.array(pickle.load(open('search/pf_val.p', 'rb')))
+#         first = True
+#         pf_objective_0 = pareto_front_true[:, 0]
+#         pf_objective_1 = pareto_front_true[:, 1]
+#         for i in range(len(pareto_front_true) - 1):
+#             if first:
+#                 tmp_point = np.array([pf_objective_0[i + 1], pf_objective_1[i]])
+#                 place_to_plot.plot([pf_objective_0[i], tmp_point[0]], [pf_objective_1[i], tmp_point[1]],
+#                                    c='#318609', label='PF True')
+#                 place_to_plot.plot([tmp_point[0], pf_objective_0[i + 1]], [tmp_point[1], pf_objective_1[i + 1]],
+#                                    c='#318609')
+#                 first = False
+#             else:
+#                 tmp_point = np.array([pf_objective_0[i + 1], pf_objective_1[i]])
+#                 place_to_plot.plot([pf_objective_0[i], tmp_point[0]], [pf_objective_1[i], tmp_point[1]],
+#                                    c='#318609')
+#                 place_to_plot.plot([tmp_point[0], pf_objective_0[i + 1]], [tmp_point[1], pf_objective_1[i + 1]],
+#                                    c='#318609')
+#
+#     first = True
+#     for i in range(len(objective_0) - 1):
+#         if first:
+#             tmp_point = np.array([objective_0[i + 1], objective_1[i]])
+#             place_to_plot.plot([objective_0[i], tmp_point[0]], [objective_1[i], tmp_point[1]], linestyle='--',
+#                                c=color, label=label, linewidth=1)
+#             place_to_plot.plot([tmp_point[0], objective_0[i + 1]], [tmp_point[1], objective_1[i + 1]], c=color,
+#                                linestyle='--', linewidth=1)
+#             first = False
+#         else:
+#             tmp_point = np.array([objective_0[i + 1], objective_1[i]])
+#             place_to_plot.plot([objective_0[i], tmp_point[0]], [objective_1[i], tmp_point[1]],
+#                                c=color, linestyle='--', linewidth=1)
+#             place_to_plot.plot([tmp_point[0], objective_0[i + 1]], [tmp_point[1], objective_1[i + 1]], c=color,
+#                                linestyle='--', linewidth=1)
+#     place_to_plot.scatter(objective_0, objective_1, c=color, marker=marker, s=size)
+#     place_to_plot.set_xlabel(axis_labels[0])
+#     place_to_plot.set_ylabel(axis_labels[1])
+#     if legend:
+#         place_to_plot.legend()
+#
+#
+# def visualize_scatter_pf(objective_0, objective_1, size, label, place_to_plot, benchmark=None,
+#                          color='blue', axis_labels=('x', 'y'), legend=False, visualize_pf_true=False):
+#     if visualize_pf_true:
+#         pf_true = None
+#         if benchmark == 'nas101':
+#             pf_true = pickle.load(open('101_benchmark/pf_valerror_trainingtime.p', 'rb'))
+#         elif benchmark == 'cifar10':
+#             pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+#         elif benchmark == 'cifar100':
+#             pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+#         plt.scatter(pf_true[:, 1], pf_true[:, 0], s=20, label='PF True', c='#318609')
+#     place_to_plot.scatter(objective_0, objective_1, s=size, facecolors='none', edgecolors=color, label=label)
+#     place_to_plot.set_xlabel(axis_labels[0])
+#     place_to_plot.set_ylabel(axis_labels[1])
+#     if legend:
+#         place_to_plot.legend()
+#
+#
+# def visualize_pf_approximate_2_algorithm(path1, path2, benchmark=None, visualize_all=False, plot_scatter=False,
+#                                          show_fig=False, save_fig=False, visualize_pf_true=False):
+#     try:
+#         os.mkdir('fig/' + dir_name + '/pf')
+#     except FileExistsError:
+#         pass
+#
+#     pfs_lst_1 = get_pfs(path1, visualize_all=visualize_all)
+#     pfs_lst_2 = get_pfs(path2, visualize_all=visualize_all)
+#
+#     number_of_pfs_visualize = len(pfs_lst_1)
+#     for pfs_i in range(number_of_pfs_visualize):
+#         fig, ax = plt.subplots(1)
+#
+#         axis_lbs = []
+#         if benchmark == 'nas101':
+#             axis_lbs = ['Norm #Training time', 'Validation error']
+#         elif benchmark == 'cifar10' or benchmark == 'cifar100':
+#             axis_lbs = ['Norm #MMACs', 'Validation error']
+#
+#         label1 = path1.split('_')[2:5]
+#         label2 = path2.split('_')[2:5]
+#
+#         if plot_scatter:
+#             visualize_scatter_pf(objective_0=pfs_lst_1[pfs_i][:, 1], objective_1=pfs_lst_1[pfs_i][:, 0], size=100,
+#                                  place_to_plot=ax, axis_labels=axis_lbs, color='blue', label=label1,
+#                                  benchmark=benchmark, legend=True, visualize_pf_true=visualize_pf_true)
+#             visualize_scatter_pf(objective_0=pfs_lst_2[pfs_i][:, 1], objective_1=pfs_lst_2[pfs_i][:, 0], size=50,
+#                                  place_to_plot=ax, axis_labels=axis_lbs, color='red', label=label2,
+#                                  benchmark=benchmark, legend=True, visualize_pf_true=False)
+#         else:
+#             visualize_pf(objective_0=pfs_lst_1[pfs_i][:, 0], objective_1=pfs_lst_1[pfs_i][:, 1],
+#                          place_to_plot=ax, axis_labels=axis_lbs, color='blue', label=label1, legend=True,
+#                          visualize_pf_true=False, marker='s', size=20)
+#             visualize_pf(objective_0=pfs_lst_2[pfs_i][:, 0], objective_1=pfs_lst_2[pfs_i][:, 1],
+#                          place_to_plot=ax, axis_labels=axis_lbs, color='red', label=label2, legend=True,
+#                          visualize_pf_true=False, marker='^')
+#         plt.title(f'Elitist Archive Exp {pfs_i}')
+#         if save_fig:
+#             plt.savefig('fig/' + dir_name + '/pf/' + f'elitist_archive_exp_{pfs_i}')
+#             print('Figures are saved on ' + 'fig/' + dir_name + '/pf')
+#         if show_fig:
+#             plt.show()
+#         plt.clf()
 
 
-def get_pfs(path, visualize_all=False):
-    pfs_lst = []
-    if visualize_all:
-        number_of_pfs_to_visualize = len(os.listdir(path))
-    else:
-        number_of_pfs_to_visualize = 1
-    for number_of_file in range(number_of_pfs_to_visualize):
-        path_ = path + f'/{number_of_file}/pf_eval'
-        pf_and_eval_folder = os.listdir(path_)
-
-        # Sort files by name
-        pf_and_eval_folder = sorted(pf_and_eval_folder, key=lambda x: int(x.split('_')[-1][:-2]))
-
-        pf, _ = pickle.load(open(path_ + '/' + pf_and_eval_folder[-1], 'rb'))
-        pfs_lst.append(pf)
-    return pfs_lst
-
-
-def visualize_pf(objective_0, objective_1, place_to_plot, label, axis_labels=('x', 'y'), color='blue', legend=False,
-                 visualize_pf_true=False, marker='.', size=10):
-    if visualize_pf_true:
-        pareto_front_true = np.array(pickle.load(open('search/pf_val.p', 'rb')))
-        first = True
-        pf_objective_0 = pareto_front_true[:, 0]
-        pf_objective_1 = pareto_front_true[:, 1]
-        for i in range(len(pareto_front_true) - 1):
-            if first:
-                tmp_point = np.array([pf_objective_0[i + 1], pf_objective_1[i]])
-                place_to_plot.plot([pf_objective_0[i], tmp_point[0]], [pf_objective_1[i], tmp_point[1]],
-                                   c='#318609', label='PF True')
-                place_to_plot.plot([tmp_point[0], pf_objective_0[i + 1]], [tmp_point[1], pf_objective_1[i + 1]],
-                                   c='#318609')
-                first = False
-            else:
-                tmp_point = np.array([pf_objective_0[i + 1], pf_objective_1[i]])
-                place_to_plot.plot([pf_objective_0[i], tmp_point[0]], [pf_objective_1[i], tmp_point[1]],
-                                   c='#318609')
-                place_to_plot.plot([tmp_point[0], pf_objective_0[i + 1]], [tmp_point[1], pf_objective_1[i + 1]],
-                                   c='#318609')
-
-    first = True
-    for i in range(len(objective_0) - 1):
-        if first:
-            tmp_point = np.array([objective_0[i + 1], objective_1[i]])
-            place_to_plot.plot([objective_0[i], tmp_point[0]], [objective_1[i], tmp_point[1]], linestyle='--',
-                               c=color, label=label, linewidth=1)
-            place_to_plot.plot([tmp_point[0], objective_0[i + 1]], [tmp_point[1], objective_1[i + 1]], c=color,
-                               linestyle='--', linewidth=1)
-            first = False
-        else:
-            tmp_point = np.array([objective_0[i + 1], objective_1[i]])
-            place_to_plot.plot([objective_0[i], tmp_point[0]], [objective_1[i], tmp_point[1]],
-                               c=color, linestyle='--', linewidth=1)
-            place_to_plot.plot([tmp_point[0], objective_0[i + 1]], [tmp_point[1], objective_1[i + 1]], c=color,
-                               linestyle='--', linewidth=1)
-    place_to_plot.scatter(objective_0, objective_1, c=color, marker=marker, s=size)
-    place_to_plot.set_xlabel(axis_labels[0])
-    place_to_plot.set_ylabel(axis_labels[1])
-    if legend:
-        place_to_plot.legend()
-
-
-def visualize_scatter_pf(objective_0, objective_1, size, label, place_to_plot, benchmark=None,
-                         color='blue', axis_labels=('x', 'y'), legend=False, visualize_pf_true=False):
-    if visualize_pf_true:
-        pf_true = None
-        if benchmark == 'nas101':
-            pf_true = pickle.load(open('101_benchmark/pf_valerror_trainingtime.p', 'rb'))
-        elif benchmark == 'cifar10':
-            pf_true = pickle.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
-        elif benchmark == 'cifar100':
-            pf_true = pickle.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
-        plt.scatter(pf_true[:, 1], pf_true[:, 0], s=20, label='PF True', c='#318609')
-    place_to_plot.scatter(objective_0, objective_1, s=size, facecolors='none', edgecolors=color, label=label)
-    place_to_plot.set_xlabel(axis_labels[0])
-    place_to_plot.set_ylabel(axis_labels[1])
-    if legend:
-        place_to_plot.legend()
-
-
-def visualize_pf_approximate_2_algorithm(path1, path2, benchmark=None, visualize_all=False, plot_scatter=False,
-                                         show_fig=False, save_fig=False, visualize_pf_true=False):
-    try:
-        os.mkdir('fig/' + dir_name + '/pf')
-    except FileExistsError:
-        pass
-
-    pfs_lst_1 = get_pfs(path1, visualize_all=visualize_all)
-    pfs_lst_2 = get_pfs(path2, visualize_all=visualize_all)
-
-    number_of_pfs_visualize = len(pfs_lst_1)
-    for pfs_i in range(number_of_pfs_visualize):
-        fig, ax = plt.subplots(1)
-
-        axis_lbs = []
-        if benchmark == 'nas101':
-            axis_lbs = ['Norm #Training time', 'Validation error']
-        elif benchmark == 'cifar10' or benchmark == 'cifar100':
-            axis_lbs = ['Norm #MMACs', 'Validation error']
-
-        label1 = path1.split('_')[2:5]
-        label2 = path2.split('_')[2:5]
-
-        if plot_scatter:
-            visualize_scatter_pf(objective_0=pfs_lst_1[pfs_i][:, 1], objective_1=pfs_lst_1[pfs_i][:, 0], size=100,
-                                 place_to_plot=ax, axis_labels=axis_lbs, color='blue', label=label1,
-                                 benchmark=benchmark, legend=True, visualize_pf_true=visualize_pf_true)
-            visualize_scatter_pf(objective_0=pfs_lst_2[pfs_i][:, 1], objective_1=pfs_lst_2[pfs_i][:, 0], size=50,
-                                 place_to_plot=ax, axis_labels=axis_lbs, color='red', label=label2,
-                                 benchmark=benchmark, legend=True, visualize_pf_true=False)
-        else:
-            visualize_pf(objective_0=pfs_lst_1[pfs_i][:, 0], objective_1=pfs_lst_1[pfs_i][:, 1],
-                         place_to_plot=ax, axis_labels=axis_lbs, color='blue', label=label1, legend=True,
-                         visualize_pf_true=False, marker='s', size=20)
-            visualize_pf(objective_0=pfs_lst_2[pfs_i][:, 0], objective_1=pfs_lst_2[pfs_i][:, 1],
-                         place_to_plot=ax, axis_labels=axis_lbs, color='red', label=label2, legend=True,
-                         visualize_pf_true=False, marker='^')
-        plt.title(f'Elitist Archive Exp {pfs_i}')
-        if save_fig:
-            plt.savefig('fig/' + dir_name + '/pf/' + f'elitist_archive_exp_{pfs_i}')
-            print('Figures are saved on ' + 'fig/' + dir_name + '/pf')
-        if show_fig:
-            plt.show()
-        plt.clf()
-
-
-'''------ Visualize "Distance from True Pareto Front to Approximate Pareto Front " and "Number of Evaluations" ------'''
+'''------ Visualize "Distance from True Pareto Front to Approximate Pareto Front" and "Number of Evaluations" ------'''
 
 
 def get_avg_dpfs_and_no_evaluations(paths):
@@ -249,17 +203,17 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
-        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA (original) (max no.evaluations: 3e4)'
-        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
-                     f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
-        else:
-            label_ = label
+        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA (original) (max no.evaluations: 3e4)'
+        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
+        #              f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
+        # else:
+        label_ = label
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
 
@@ -313,13 +267,8 @@ def find_max_f0_f1_min_f0_f1(paths):
 
 
 def cal_hyper_volume(hp, pareto_front, rf):
-    # rf = [max_f0 + 1e-5, max_f1 + 1e-5]
-    # tmp = [rf[0] - min_f0, rf[1] - min_f1]
-    # hp = _HyperVolume(rf)
-
     hyper_volume = hp.compute(pareto_front)
     return hyper_volume / np.prod(rf)
-    # return 1 - hyper_volume / np.prod(tmp)
 
 
 def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
@@ -414,17 +363,17 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
-        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA (original) (max no.evaluations: 3e4)'
-        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
-                     f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
-        else:
-            label_ = label
+        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA (original) (max no.evaluations: 3e4)'
+        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
+        #              f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
+        # else:
+        label_ = label
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
     if log_x:
@@ -462,7 +411,7 @@ if __name__ == '__main__':
     SAVE = False
     LOG_X = True
     LOG_Y = False
-    FOLDER = 'results/run'
+    FOLDER = 'D:/files/running'
     if SAVE:
         now = datetime.now()
         dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')

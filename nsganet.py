@@ -1,5 +1,4 @@
 import argparse
-import copy
 import os
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,36 +13,65 @@ from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinary
 from pymoo.operators.default_operators import set_if_none
 from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
 from pymoo.operators.sampling.random_sampling import RandomSampling
-from pymoo.operators.selection.tournament_selection import compare, TournamentSelection
+from pymoo.operators.selection.tournament_selection import TournamentSelection
 from pymoo.rand import random
 from pymoo.util.display import disp_multi_objective
-from pymoo.util.dominator import Dominator
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
-from pymoo.util.randomized_argsort import randomized_argsort
-
 # =========================================================================================================
 # Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
 # =========================================================================================================
 from nasbench import wrap_api as api
-from nasbench.lib import model_spec
 
 from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
+
 from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
+
 from wrap_pymoo.util.compare import find_better_idv, find_better_idv_bosman_ver
 from wrap_pymoo.util.dpfs_calculating import cal_dpfs
 from wrap_pymoo.util.elitist_archive import update_elitist_archive
 from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
+from wrap_pymoo.util.survial_selection import RankAndCrowdingSurvival
+from wrap_pymoo.util.tournament_selection import binary_tournament
 
-ModelSpec = model_spec.ModelSpec
+from wrap_pymoo.factory_nasbench import combine_matrix1D_and_opsINT, split_to_matrix1D_and_opsINT, create_model
+from wrap_pymoo.factory_nasbench import encoding_ops, decoding_ops, encoding_matrix, decoding_matrix
 
 
+# Using for Cifar10 and Cifar100
 def encode(X):
     if isinstance(X, list):
         X = np.array(X)
     encode_X = np.where(X == 'I', 0, X)
     encode_X = np.array(encode_X, dtype=np.int)
     return encode_X
+
+
+def insert_to_list_x(x):
+    added = ['|', '|', '|']
+    indices = [4, 8, 12]
+
+    acc = 0
+    for i in range(len(added)):
+        x.insert(indices[i]+acc, added[i])
+        acc += 1
+    return x
+
+
+def remove_values_from_list_x(x, val):
+    return [value for value in x if value != val]
+
+
+def convert_X_to_hashX(x):
+    if not isinstance(x, list):
+        x = x.tolist()
+    x = insert_to_list_x(x)
+    x = remove_values_from_list_x(x, 'I')
+    hashX = ''.join(x)
+    return hashX
+
+
+'''------------------------------------------------------------------------------------------------------------------'''
 
 
 class NSGANet(GeneticAlgorithm):
@@ -66,6 +94,8 @@ class NSGANet(GeneticAlgorithm):
 
         ''' Custom '''
         self.crossover_type = crossover_type
+
+        self.dominated_idv = []
         self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = [], [], []
 
         self.dpfs = []
@@ -81,9 +111,9 @@ class NSGANet(GeneticAlgorithm):
         self.no_evaluations = 0
         self.path = path
 
-    def true_evaluate(self, X, count_n_evaluations=True):
+    def true_evaluate(self, X, single=False, count_n_evaluations=True):
         if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-            if len(X.shape) == 1:
+            if single:
                 F = np.full(2, fill_value=np.nan)
 
                 hashX = ''.join(X.tolist())
@@ -108,10 +138,14 @@ class NSGANet(GeneticAlgorithm):
                         self.no_evaluations += 1
 
         else:
-            if len(X.shape) == 2:
+            if single:
                 F = np.full(2, fill_value=np.nan)
+                matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
 
-                modelspec = api.ModelSpec(matrix=np.array(X[:-1], dtype=np.int), ops=X[-1].tolist())
+                matrix_2D = encoding_matrix(matrix_1D)
+                ops_STRING = encoding_ops(ops_INT)
+
+                modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                 hashX = BENCHMARK_API.get_module_hash(modelspec)
 
                 F[0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
@@ -120,12 +154,15 @@ class NSGANet(GeneticAlgorithm):
 
                 if count_n_evaluations:
                     self.no_evaluations += 1
-
             else:
-                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+                F = np.full(shape=(len(X), 2), fill_value=np.nan)
 
-                for i in range(X.shape[0]):
-                    modelspec = api.ModelSpec(matrix=np.array(X[i][:-1], dtype=np.int), ops=X[i][-1].tolist())
+                for i in range(len(X)):
+                    matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X[i])
+
+                    matrix_2D = encoding_matrix(matrix_1D)
+                    ops_STRING = encoding_ops(ops_INT)
+                    modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                     hashX = BENCHMARK_API.get_module_hash(modelspec)
 
                     F[i, 0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
@@ -137,11 +174,11 @@ class NSGANet(GeneticAlgorithm):
 
         return F
 
-    def fake_evaluate(self, X):
+    def fake_evaluate(self, X, single=False):
         if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
             encode_X = encode(X)
 
-            if len(encode_X.shape) == 1:
+            if single:
                 F = np.full(2, fill_value=np.nan)
 
                 hashX = ''.join(X.tolist())
@@ -149,6 +186,7 @@ class NSGANet(GeneticAlgorithm):
                 F[0] = (BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['min_MMACs']) \
                        / (BENCHMARK_MIN_MAX['max_MMACs'] - BENCHMARK_MIN_MAX['min_MMACs'])
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
+
             else:
                 F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
                 for i in range(encode_X.shape[0]):
@@ -159,7 +197,34 @@ class NSGANet(GeneticAlgorithm):
                 f1 = self.surrogate_model.predict(encode_X).reshape(X.shape[0])
                 F[:, 1] = f1
         else:
-            F = None
+            if single:
+                F = np.full(2, fill_value=np.nan)
+
+                matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
+
+                matrix_2D = encoding_matrix(matrix_1D)
+                ops_STRING = encoding_ops(ops_INT)
+                modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                hashX = BENCHMARK_API.get_module_hash(modelspec)
+
+                F[0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
+                        BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
+                F[1] = self.surrogate_model.predict(np.array([X]))[0][0]
+
+            else:
+                F = np.full(shape=(X.shape[0], 2), fill_value=np.nan)
+                for i in range(len(X)):
+                    matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X[i])
+
+                    matrix_2D = encoding_matrix(matrix_1D)
+                    ops_STRING = encoding_ops(ops_INT)
+                    modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                    hashX = BENCHMARK_API.get_module_hash(modelspec)
+
+                    F[i, 0] = (BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX['min_model_params']) / (
+                            BENCHMARK_MIN_MAX['max_model_params'] - BENCHMARK_MIN_MAX['min_model_params'])
+                f1 = self.surrogate_model.predict(X).reshape(X.shape[0])
+                F[:, 1] = f1
         return F
 
     @staticmethod
@@ -177,32 +242,24 @@ class NSGANet(GeneticAlgorithm):
 
             while len(pop_X) < n_samples:
                 new_X = np.random.choice(allowed_choices, 14)
-                new_hashX = ''.join(new_X.tolist())
+                new_hashX = convert_X_to_hashX(new_X)
                 if new_hashX not in pop_hashX:
                     pop_X.append(new_X)
                     pop_hashX.append(new_hashX)
-        else:
-            INPUT = 'input'
-            OUTPUT = 'output'
-            conv3x3 = 'conv3x3-bn-relu'
-            conv1x1 = 'conv1x1-bn-relu'
-            maxpool3x3 = 'maxpool3x3'
-            num_vertices = 7
-            allowed_ops = [conv1x1, conv3x3, maxpool3x3]
-            allowed_edges = [0, 1]
-            while len(pop_X) < n_samples:
-                matrix = np.random.choice(allowed_edges, size=(num_vertices, num_vertices))
-                matrix = np.triu(matrix, 1)
-                ops = np.random.choice(allowed_ops, size=(1, num_vertices))
-                ops[0][0] = INPUT
-                ops[0][-1] = OUTPUT
 
-                modelspec = api.ModelSpec(matrix=matrix, ops=ops[0].tolist())
+        else:
+            while len(pop_X) < n_samples:
+                matrix_2D, ops_STRING = create_model()
+                modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
 
                 if BENCHMARK_API.is_valid(modelspec):
                     hashX = BENCHMARK_API.get_module_hash(modelspec)
+
                     if hashX not in pop_hashX:
-                        X = np.concatenate((matrix, ops), axis=0)
+                        matrix_1D = decoding_matrix(matrix_2D)
+                        ops_INT = decoding_ops(ops_STRING)
+
+                        X = combine_matrix1D_and_opsINT(matrix=matrix_1D, ops=ops_INT)
                         pop_X.append(X)
                         pop_hashX.append(hashX)
 
@@ -211,84 +268,70 @@ class NSGANet(GeneticAlgorithm):
 
         return pop
 
-    @staticmethod
-    def _crossover(pop, type_crossover='UX'):
+    def _crossover(self, pop, type_crossover='UX'):
         pop_X = pop.get('X')
 
         offsprings_X, offsprings_hashX = [], []
 
         n_crossovers = 0
-
+        n_counts = 0
         while len(offsprings_X) < len(pop_X):
             idx = np.random.choice(len(pop_X), size=(len(pop_X) // 2, 2), replace=False)
             pop_X_ = pop.get('X')[idx]
 
             if BENCHMARK_NAME == 'nas101':
                 for i in range(len(pop_X_)):
+                    tmp_offspring1_X, tmp_offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
+
                     if type_crossover == 'UX':
-                        tmp_offspring1_X, tmp_offspring2_X = pop_X_[i][0].copy(), pop_X_[i][1].copy()
+                        crossover_pts = np.random.randint(0, 2, tmp_offspring1_X.shape, dtype=np.bool)
 
-                        crossover_pts = np.random.randint(0, 2, tmp_offspring1_X[-1].shape, dtype=np.bool)
+                        tmp_offspring1_X[crossover_pts], tmp_offspring2_X[crossover_pts] = \
+                            tmp_offspring2_X[crossover_pts], tmp_offspring1_X[crossover_pts].copy()
 
-                        tmp_offspring1_X[-1][crossover_pts], tmp_offspring1_X[-1][crossover_pts] = \
-                            tmp_offspring1_X[-1][crossover_pts], tmp_offspring1_X[-1][crossover_pts].copy()
+                    elif type_crossover == '1X':
+                        crossover_pt = np.random.randint(1, len(tmp_offspring1_X))
 
-                        tmp_module_spec1 = api.ModelSpec(matrix=np.array(tmp_offspring1_X[:-1], dtype=np.int),
-                                                         ops=tmp_offspring1_X[-1].tolist())
-                        tmp_module_spec2 = api.ModelSpec(matrix=np.array(tmp_offspring1_X[:-1], dtype=np.int),
-                                                         ops=tmp_offspring1_X[-1].tolist())
+                        tmp_offspring1_X[crossover_pt:], tmp_offspring2_X[crossover_pt:] = \
+                            tmp_offspring2_X[crossover_pt:], tmp_offspring1_X[crossover_pt:].copy()
 
-                        tmp_offspring1_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec1)
-                        tmp_offspring2_hashX = BENCHMARK_API.get_module_hash(tmp_module_spec2)
+                    elif type_crossover == '2X':
+                        crossover_pts = np.random.choice(range(1, len(tmp_offspring1_X) - 1), 2, replace=False)
+                        lower = min(crossover_pts)
+                        upper = max(crossover_pts)
 
-                        tmp_offsprings_X = [tmp_offspring1_X, tmp_offspring1_X]
-                        tmp_module_specs = [tmp_module_spec1, tmp_module_spec2]
-                        tmp_offsprings_hashX = [tmp_offspring1_hashX, tmp_offspring2_hashX]
-
-                        for j in range(2):
-                            if BENCHMARK_API.is_valid(tmp_module_specs[j]):
-                                if n_crossovers <= 100:
-                                    if tmp_offsprings_hashX[j] not in offsprings_hashX:
-                                        offsprings_X.append(tmp_offsprings_X[j])
-                                        offsprings_hashX.append(tmp_offsprings_hashX[j])
-                                else:
-                                    offsprings_X.append(tmp_offsprings_X[j])
-                                    offsprings_hashX.append(tmp_offsprings_hashX[j])
-                            else:
-                                print('invalid-crossover')
+                        tmp_offspring1_X[lower:upper], tmp_offspring2_X[lower:upper] = \
+                            tmp_offspring2_X[lower:upper], tmp_offspring1_X[lower:upper].copy()
                     else:
-                        # 2 points crossover
-                        parent1_matrix, parent2_matrix = pop_X_[i][0][:-1, :].copy(), pop_X_[i][1][:-1, :].copy()
-                        parent1_ops, parent2_ops = pop_X_[i][0][-1, :].copy(), pop_X_[i][1][-1, :].copy()
+                        raise Exception('Crossover method is not available!')
 
-                        points_crossover = np.random.choice(range(1, 6), size=2, replace=False)
+                    matrix1_1D, ops1_INT = split_to_matrix1D_and_opsINT(tmp_offspring1_X)
+                    matrix2_1D, ops2_INT = split_to_matrix1D_and_opsINT(tmp_offspring2_X)
 
-                        low = points_crossover[0]
-                        if low > points_crossover[1]:
-                            high = low
-                            low = points_crossover[1]
-                        else:
-                            high = points_crossover[1]
+                    matrix1_2D = encoding_matrix(matrix1_1D)
+                    matrix2_2D = encoding_matrix(matrix2_1D)
 
-                        parent1_matrix[low:high], parent2_matrix[low:high] = \
-                            parent2_matrix[low:high], parent1_matrix[low: high].copy()
-                        parent1_ops[low:high], parent2_ops[low:high] = \
-                            parent2_ops[low:high], parent1_ops[low:high].copy()
+                    ops1_STRING = encoding_ops(ops1_INT)
+                    ops2_STRING = encoding_ops(ops2_INT)
 
-                        idv_check = [[parent1_matrix, parent1_ops], [parent2_matrix, parent2_ops]]
-                        for idv in idv_check:
-                            spec = api.ModelSpec(matrix=np.array(idv[0], dtype=np.int), ops=idv[1].tolist())
-                            if BENCHMARK_API.is_valid(spec):
-                                module_hash_spec = BENCHMARK_API.get_module_hash(spec)
-                                X = np.concatenate((idv[0], np.array([idv[1]])), axis=0)
+                    tmp_modelspec1 = api.ModelSpec(matrix=matrix1_2D, ops=ops1_STRING)
+                    tmp_modelspec2 = api.ModelSpec(matrix=matrix2_2D, ops=ops2_STRING)
 
-                                if n_crossovers <= 100:
-                                    if module_hash_spec not in offsprings_hashX:
-                                        offsprings_X.append(X)
-                                        offsprings_hashX.append(module_hash_spec)
-                                else:
-                                    offsprings_X.append(X)
-                                    offsprings_hashX.append(module_hash_spec)
+                    list_tmp_modelspec = [tmp_modelspec1, tmp_modelspec2]
+                    list_tmp_offspring_X = [tmp_offspring1_X, tmp_offspring2_X]
+
+                    for j in range(2):
+                        if BENCHMARK_API.is_valid(list_tmp_modelspec[j]):
+                            n_counts += 1
+                            tmp_offspring_hashX = BENCHMARK_API.get_module_hash(list_tmp_modelspec[j])
+                            if n_crossovers <= 100:
+                                if (tmp_offspring_hashX not in offsprings_hashX) and \
+                                        (tmp_offspring_hashX not in self.dominated_idv):
+                                    offsprings_X.append(list_tmp_offspring_X[j])
+                                    offsprings_hashX.append(tmp_offspring_hashX)
+                            else:
+                                offsprings_X.append(list_tmp_offspring_X[j])
+                                offsprings_hashX.append(tmp_offspring_hashX)
 
             elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
                 for i in range(len(pop_X_)):
@@ -316,15 +359,17 @@ class NSGANet(GeneticAlgorithm):
                     else:
                         raise Exception('Crossover method is not available!')
 
-                    tmp_offspring1_hashX = ''.join(tmp_offspring1_X.tolist())
-                    tmp_offspring2_hashX = ''.join(tmp_offspring2_X.tolist())
+                    tmp_offspring1_hashX = convert_X_to_hashX(tmp_offspring1_X)
+                    tmp_offspring2_hashX = convert_X_to_hashX(tmp_offspring2_X)
 
                     if n_crossovers <= 100:
-                        if tmp_offspring1_hashX not in offsprings_hashX:
+                        if (tmp_offspring1_hashX not in offsprings_hashX) and \
+                                (tmp_offspring1_hashX not in self.dominated_idv):
                             offsprings_X.append(tmp_offspring1_X)
                             offsprings_hashX.append(tmp_offspring1_hashX)
 
-                        if tmp_offspring2_hashX not in offsprings_hashX:
+                        if (tmp_offspring2_hashX not in offsprings_hashX) and \
+                                (tmp_offspring2_hashX not in self.dominated_idv):
                             offsprings_X.append(tmp_offspring2_X)
                             offsprings_hashX.append(tmp_offspring2_hashX)
                     else:
@@ -347,8 +392,7 @@ class NSGANet(GeneticAlgorithm):
         offsprings.set('hashX', offspring_hashX)
         return offsprings
 
-    @staticmethod
-    def _mutation(pop, old_offsprings, prob_mutation=0.05):
+    def _mutation(self, pop, old_offsprings, prob_mutation=0.05):
         pop_hashX = pop.get('hashX')
 
         new_offsprings = Population(len(old_offsprings))
@@ -361,28 +405,34 @@ class NSGANet(GeneticAlgorithm):
         while len(new_offsprings_X) < len(old_offsprings):
             if BENCHMARK_NAME == 'nas101':
                 for x in old_offsprings_X:
-                    new_matrix = copy.deepcopy(np.array(x[:-1, :], dtype=np.int))
-                    new_ops = copy.deepcopy(x[-1, :])
-                    # In expectation, V edges flipped (note that most end up being pruned).
-                    # edge_mutation_prob = 1 / 7
-                    for src in range(0, 7 - 1):
-                        for dst in range(src + 1, 7):
-                            if np.random.rand() < prob_mutation:
-                                new_matrix[src, dst] = 1 - new_matrix[src, dst]
+                    matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x)
 
-                    # In expectation, one op is resampled.
-                    # op_mutation_prob = 1 / 5
-                    for ind in range(1, 7 - 1):
-                        if np.random.rand() < prob_mutation:
-                            available = [o for o in BENCHMARK_API.config['available_ops'] if o != new_ops[ind]]
-                            new_ops[ind] = np.random.choice(available)
-                    new_modelspec = api.ModelSpec(new_matrix, new_ops.tolist())
+                    new_matrix_1D = matrix_1D.copy()
+                    new_ops_INT = ops_INT.copy()
+
+                    prob_mutation_idxs_matrix = np.random.rand(len(new_matrix_1D))
+                    for i in range(len(prob_mutation_idxs_matrix)):
+                        if prob_mutation_idxs_matrix[i] <= prob_mutation:
+                            new_matrix_1D[i] = 1 - new_matrix_1D[i]
+
+                    prob_mutation_idxs_ops = np.random.rand(len(new_ops_INT))
+                    for i in range(len(prob_mutation_idxs_ops)):
+                        if prob_mutation_idxs_ops[i] <= prob_mutation:
+                            choices = [0, 1, 2]
+                            choices.remove(new_ops_INT[i])
+                            new_ops_INT[i] = np.random.choice(choices)
+
+                    matrix_2D = encoding_matrix(new_matrix_1D)
+                    ops_STRING = encoding_ops(new_ops_INT)
+
+                    new_modelspec = api.ModelSpec(matrix_2D, ops_STRING)
 
                     if BENCHMARK_API.is_valid(new_modelspec):
                         hashX = BENCHMARK_API.get_module_hash(new_modelspec)
                         if (hashX not in new_offsprings_hashX) and \
-                                (hashX not in pop_hashX):
-                            new_offsprings_X.append(np.concatenate((new_matrix, np.array([new_ops])), axis=0))
+                                (hashX not in pop_hashX) and (hashX not in self.dominated_idv):
+                            X = combine_matrix1D_and_opsINT(new_matrix_1D, new_ops_INT)
+                            new_offsprings_X.append(X)
                             new_offsprings_hashX.append(hashX)
 
             elif BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
@@ -398,10 +448,11 @@ class NSGANet(GeneticAlgorithm):
 
                             tmp_new_offspring_X[j] = np.random.choice(allowed_choices)
 
-                    tmp_new_offspring_hashX = ''.join(tmp_new_offspring_X)
+                    tmp_new_offspring_hashX = convert_X_to_hashX(tmp_new_offspring_X)
 
                     if (tmp_new_offspring_hashX not in new_offsprings_hashX) and \
-                            (tmp_new_offspring_hashX not in pop_hashX):
+                            (tmp_new_offspring_hashX not in pop_hashX) and \
+                            (tmp_new_offspring_hashX not in self.dominated_idv):
                         new_offsprings_X.append(tmp_new_offspring_X)
                         new_offsprings_hashX.append(tmp_new_offspring_hashX)
 
@@ -420,9 +471,12 @@ class NSGANet(GeneticAlgorithm):
         pop_F = self.true_evaluate(X=pop.get('X'))
         pop.set('F', pop_F)
         if self.using_surrogate_model:
-            self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
-                                                                targets=pop_F[:, 1])
-            # print('-> initialize surrogate model - done')
+            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X')),
+                                                                    targets=pop_F[:, 1])
+            else:
+                self.surrogate_model = self._create_surrogate_model(inputs=pop.get('X'),
+                                                                    targets=pop_F[:, 1])
 
         pop = self.survival.do(pop, self.pop_size)
 
@@ -441,58 +495,95 @@ class NSGANet(GeneticAlgorithm):
         if ls_on_knee_solutions:
             first, last = len(x_old_X) - 2, len(x_old_X) - 1
 
-        stop_iter = 14
+        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+            max_true_n_searches = 14
+        else:
+            max_true_n_searches = 26
 
         if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
-                checked = [x_old_hashX[i]]
-                j = 0
+                # Avoid stuck because don't find any better architecture
+                max_tmp_n_searches = 100
+                tmp_n_searches = 0
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
+                checked = [x_old_hashX[i]]
+                true_n_searches = 0
+
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < max_tmp_n_searches):
+                    tmp_n_searches += 1
                     if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
                         idx = np.random.randint(0, 14)
                         ops = ['I', '1', '2']
                         ops.remove(x_old_X[i][idx])
-                    else:
-                        idx = np.random.randint(1, 6)
-                        ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
 
-                    x_new_X = x_old_X[i].copy()
+                        new_op = np.random.choice(ops)
 
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                        x_new_X = x_old_X[i].copy()
                         x_new_X[idx] = new_op
+                        x_new_hashX = convert_X_to_hashX(x_new_X)
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
                     else:
-                        x_new_X[-1][idx] = new_op
+                        ''' Local search on ops '''
+                        # matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
+                        #
+                        # matrix_2D = encoding_matrix(matrix_1D)
+                        # ops_STRING = encoding_ops(ops_INT)
+                        #
+                        # idx = np.random.randint(1, 6)
+                        # ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        # ops.remove(ops_STRING[idx])
+                        #
+                        # new_op = np.random.choice(ops)
+                        #
+                        # ops_STRING[idx] = new_op
+                        #
+                        # modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                        # x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        #
+                        # ops_INT = decoding_ops(ops_STRING)
+                        #
+                        # x_new_X = combine_matrix1D_and_opsINT(matrix_1D, ops_INT)
 
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        ''' Local search on edges '''
+                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
 
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        ops_STRING = encoding_ops(ops_INT)
+
+                        while True:
+                            idx = np.random.randint(len(matrix_1D))
+                            matrix_1D_new = matrix_1D.copy()
+                            matrix_1D_new[idx] = 1 - matrix_1D[idx]
+
+                            matrix_2D_new = encoding_matrix(matrix_1D_new)
+
+                            modelspec = api.ModelSpec(matrix=matrix_2D_new, ops=ops_STRING)
+                            if BENCHMARK_API.is_valid(modelspec):
+                                x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                                x_new_X = combine_matrix1D_and_opsINT(matrix_1D_new, ops_INT)
+                                break
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX)\
+                            and (x_new_hashX not in self.dominated_idv):
                         checked.append(x_new_hashX)
-                        j += 1
+                        true_n_searches += 1
 
                         true_x_new_F = None
                         if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
+                            x_new_F = self.fake_evaluate(x_new_X, single=True)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.0835:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.304:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
+                            else:
+                                if x_new_F[1] < 0.067:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
 
                             self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                            true_x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=False)
                         else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                            x_new_F = self.true_evaluate(x_new_X, single=True)
 
                         if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                             better_idv = find_better_idv(x_new_F, x_old_F[i], 'first')
@@ -512,6 +603,14 @@ class NSGANet(GeneticAlgorithm):
                                 non_dominance_F.append(x_new_F)
 
                         elif better_idv == 0:
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            if self.using_surrogate_model:
+                                non_dominance_F.append(true_x_new_F)
+                            else:
+                                non_dominance_F.append(x_new_F)
+
+                        else:
                             non_dominance_X.append(x_new_X)
                             non_dominance_hashX.append(x_new_hashX)
                             if self.using_surrogate_model:
@@ -521,58 +620,97 @@ class NSGANet(GeneticAlgorithm):
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
             for i in range(len(x_old_X)):
+                # Avoid stuck because don't find any better architecture
+                max_tmp_n_searches = 100
+                tmp_n_searches = 0
 
-                max_n_searching = 100
-                n_searching = 0
                 checked = [x_old_hashX[i]]
-                j = 0
+                true_n_searches = 0
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < max_tmp_n_searches):
+                    tmp_n_searches += 1
                     if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
                         idx = np.random.choice(14, size=2, replace=False)
                         ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
                         ops1.remove(x_old_X[i][idx[0]])
                         ops2.remove(x_old_X[i][idx[1]])
-                    else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
 
-                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+                        new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
 
-                    x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                        x_new_X = x_old_X[i].copy()
+
                         x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
+                        x_new_hashX = convert_X_to_hashX(x_new_X)
+
                     else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+                        ''' Local search on ops '''
+                        # matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
+                        #
+                        # matrix_2D = encoding_matrix(matrix_1D)
+                        # ops_STRING = encoding_ops(ops_INT)
+                        #
+                        # idxs = np.random.choice(range(1, 6), size=2, replace=False)
+                        #
+                        # ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        # ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        #
+                        # ops1.remove(ops_STRING[idxs[0]])
+                        # ops2.remove(ops_STRING[idxs[1]])
+                        #
+                        # new_op1 = np.random.choice(ops1)
+                        # new_op2 = np.random.choice(ops2)
+                        #
+                        # ops_STRING[idxs[0]] = new_op1
+                        # ops_STRING[idxs[1]] = new_op2
+                        #
+                        # modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                        # x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        #
+                        # ops_INT = decoding_ops(ops_STRING)
+                        #
+                        # x_new_X = combine_matrix1D_and_opsINT(matrix_1D, ops_INT)
 
-                        module = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                           ops=x_new_X[-1].tolist())
-                        x_new_hashX = BENCHMARK_API.get_module_hash(module)
+                        ''' Local search on edges '''
+                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
 
-                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
-                        j += 1
+                        ops_STRING = encoding_ops(ops_INT)
+
+                        while True:
+                            idxs = np.random.choice(len(matrix_1D), size=4, replace=False)
+                            matrix_1D_new = matrix_1D.copy()
+                            matrix_1D_new[idxs] = 1 - matrix_1D[idxs]
+
+                            matrix_2D = encoding_matrix(matrix_1D_new)
+
+                            modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                            if BENCHMARK_API.is_valid(modelspec):
+                                x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                                x_new_X = combine_matrix1D_and_opsINT(matrix_1D_new, ops_INT)
+                                break
+
+                    if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX)\
+                            and (x_new_hashX not in self.dominated_idv):
+                        true_n_searches += 1
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
                         if self.using_surrogate_model:
-                            x_new_F = self.fake_evaluate(x_new_X)
+                            x_new_F = self.fake_evaluate(x_new_X, single=True)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.0835:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.304:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
+                            else:
+                                if x_new_F[1] < 0.067:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
 
                             self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                            true_x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=False)
                         else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                            x_new_F = self.true_evaluate(x_new_X, single=True)
 
                         if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                             better_idv = find_better_idv(x_new_F, x_old_F[i], 'first')
@@ -592,6 +730,14 @@ class NSGANet(GeneticAlgorithm):
                                 non_dominance_F.append(x_new_F)
 
                         elif better_idv == 0:
+                            non_dominance_X.append(x_new_X)
+                            non_dominance_hashX.append(x_new_hashX)
+                            if self.using_surrogate_model:
+                                non_dominance_F.append(true_x_new_F)
+                            else:
+                                non_dominance_F.append(x_new_F)
+
+                        else:
                             non_dominance_X.append(x_new_X)
                             non_dominance_hashX.append(x_new_hashX)
                             if self.using_surrogate_model:
@@ -617,57 +763,94 @@ class NSGANet(GeneticAlgorithm):
 
         non_dominance_X, non_dominance_hashX, non_dominance_F = [], [], []
 
-        stop_iter = 14
+        if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+            max_true_n_searches = 14
+        else:
+            max_true_n_searches = 26
 
         if LOCAL_SEARCH_ON_N_POINTS == 1:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
+                # Avoid stuck because don't find any better architecture
+                max_tmp_n_searches = 100
+                tmp_n_searches = 0
+
                 checked = [x_old_hashX[i]]
-                j = 0
+                true_n_searches = 0
                 alpha = np.random.rand()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < max_tmp_n_searches):
+                    tmp_n_searches += 1
                     if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
                         idx = np.random.randint(0, 14)
                         ops = ['I', '1', '2']
                         ops.remove(x_old_X[i][idx])
+
+                        new_op = np.random.choice(ops)
+
+                        x_new_X = x_old_X[i].copy()
+                        x_new_X[idx] = new_op
+                        x_new_hashX = convert_X_to_hashX(x_new_X)
                     else:
+                        ''' Local search on ops '''
+                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
+
+                        matrix_2D = encoding_matrix(matrix_1D)
+                        ops_STRING = encoding_ops(ops_INT)
+
                         idx = np.random.randint(1, 6)
                         ops = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops.remove(x_old_X[i][-1][idx])
-                    new_op = np.random.choice(ops)
+                        ops.remove(ops_STRING[idx])
 
-                    x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
-                        x_new_X[idx] = new_op
+                        new_op = np.random.choice(ops)
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
-                    else:
-                        x_new_X[-1][idx] = new_op
+                        ops_STRING[idx] = new_op
 
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
+                        modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                         x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
 
+                        ops_INT = decoding_ops(ops_STRING)
+
+                        x_new_X = combine_matrix1D_and_opsINT(matrix_1D, ops_INT)
+
+                        ''' Local search on edges '''
+                        # matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
+                        #
+                        # ops_STRING = encoding_ops(ops_INT)
+                        #
+                        # while True:
+                        #     idx = np.random.randint(len(matrix_1D))
+                        #     matrix_1D_new = matrix_1D.copy()
+                        #     matrix_1D_new[idx] = 1 - matrix_1D[idx]
+                        #
+                        #     matrix_2D_new = encoding_matrix(matrix_1D_new)
+                        #
+                        #     modelspec = ModelSpec(matrix=matrix_2D_new, ops=ops_STRING)
+                        #     if BENCHMARK_API.is_valid(modelspec):
+                        #         x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        #         x_new_X = combine_matrix1D_and_opsINT(matrix_1D_new, ops_INT)
+                        #         break
+
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        true_n_searches += 1
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.0835:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.304:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
+                            else:
+                                if x_new_F[1] < 0.067:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
 
                             self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                            true_x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=False)
                         else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                            x_new_F = self.true_evaluate(x_new_X, single=True)
 
                         better_idv = find_better_idv(f1=x_new_F, f2=x_old_F[i])
 
@@ -692,61 +875,99 @@ class NSGANet(GeneticAlgorithm):
                                     non_dominance_F.append(true_x_new_F)
                                 else:
                                     non_dominance_F.append(x_new_F)
-                        j += 1
 
         elif LOCAL_SEARCH_ON_N_POINTS == 2:
             for i in range(len(x_old_X)):
-                max_n_searching = 100
-                n_searching = 0
+                # Avoid stuck because don't find any better architecture
+                max_tmp_n_searches = 100
+                tmp_n_searches = 0
+
                 checked = [x_old_hashX[i]]
-                j = 0
+                true_n_searches = 0
                 alpha = np.random.rand()
 
-                while (j < stop_iter) and (n_searching < max_n_searching):
-                    n_searching += 1
+                while (true_n_searches < max_true_n_searches) and (tmp_n_searches < max_tmp_n_searches):
+                    tmp_n_searches += 1
                     if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
                         idx = np.random.choice(14, size=2, replace=False)
                         ops1, ops2 = ['I', '1', '2'], ['I', '1', '2']
                         ops1.remove(x_old_X[i][idx[0]])
                         ops2.remove(x_old_X[i][idx[1]])
-                    else:
-                        idx = np.random.choice(range(1, 6), size=2, replace=False)
-                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
-                        ops1.remove(x_old_X[i][-1][idx[0]])
-                        ops2.remove(x_old_X[i][-1][idx[1]])
 
-                    new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
+                        new_op1, new_op2 = np.random.choice(ops1), np.random.choice(ops2)
 
-                    x_new_X = x_old_X[i].copy()
-                    if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                        x_new_X = x_old_X[i].copy()
+
                         x_new_X[idx[0]], x_new_X[idx[1]] = new_op1, new_op2
 
-                        x_new_hashX = ''.join(x_new_X.tolist())
+                        x_new_hashX = convert_X_to_hashX(x_new_X)
                     else:
-                        x_new_X[-1][idx[0]], x_new_X[-1][idx[1]] = new_op1, new_op2
+                        ''' Local search on ops '''
+                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
 
-                        modelspec = ModelSpec(matrix=np.array(x_new_X[:-1], dtype=np.int),
-                                              ops=x_new_X[-1].tolist())
+                        matrix_2D = encoding_matrix(matrix_1D)
+                        ops_STRING = encoding_ops(ops_INT)
+
+                        idxs = np.random.choice(range(1, 6), size=2, replace=False)
+
+                        ops1 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+                        ops2 = ['conv1x1-bn-relu', 'conv3x3-bn-relu', 'maxpool3x3']
+
+                        ops1.remove(ops_STRING[idxs[0]])
+                        ops2.remove(ops_STRING[idxs[1]])
+
+                        new_op1 = np.random.choice(ops1)
+                        new_op2 = np.random.choice(ops2)
+
+                        ops_STRING[idxs[0]] = new_op1
+                        ops_STRING[idxs[1]] = new_op2
+
+                        modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                         x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
 
+                        ops_INT = decoding_ops(ops_STRING)
+
+                        x_new_X = combine_matrix1D_and_opsINT(matrix_1D, ops_INT)
+
+                        ''' Local search on edges '''
+                        # matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x_old_X[i])
+                        #
+                        # ops_STRING = encoding_ops(ops_INT)
+                        #
+                        # while True:
+                        #     idxs = np.random.choice(len(matrix_1D), size=2, replace=False)
+                        #     matrix_1D_new = matrix_1D.copy()
+                        #     matrix_1D_new[idxs] = 1 - matrix_1D[idxs]
+                        #
+                        #     matrix_2D = encoding_matrix(matrix_1D_new)
+                        #
+                        #     modelspec = ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                        #     if BENCHMARK_API.is_valid(modelspec):
+                        #         x_new_hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        #         x_new_X = combine_matrix1D_and_opsINT(matrix_1D_new, ops_INT)
+                        #         break
+
                     if (x_new_hashX not in checked) and (x_new_hashX not in x_old_hashX):
+                        true_n_searches += 1
                         checked.append(x_new_hashX)
 
                         true_x_new_F = None
                         if self.using_surrogate_model:
                             x_new_F = self.fake_evaluate(x_new_X)
                             if BENCHMARK_NAME == 'cifar10':
-                                if x_new_F[1] < 0.085:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.0835:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
                             elif BENCHMARK_NAME == 'cifar100':
-                                if x_new_F[1] < 0.305:
-                                    x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=True)
+                                if x_new_F[1] < 0.304:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
+                            else:
+                                if x_new_F[1] < 0.067:
+                                    x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=True)
 
                             self.models_for_training.append(x_new_X)
-                            true_x_new_F = self.true_evaluate(x_new_X, count_n_evaluations=False)
+                            true_x_new_F = self.true_evaluate(x_new_X, single=True, count_n_evaluations=False)
                         else:
-                            x_new_F = self.true_evaluate(x_new_X)
+                            x_new_F = self.true_evaluate(x_new_X, single=True)
 
                         better_idv = find_better_idv(f1=x_new_F, f2=x_old_F[i])
 
@@ -771,7 +992,6 @@ class NSGANet(GeneticAlgorithm):
                                     non_dominance_F.append(true_x_new_F)
                                 else:
                                     non_dominance_F.append(x_new_F)
-                        j += 1
 
         non_dominance_X = np.array(non_dominance_X)
         non_dominance_hashX = np.array(non_dominance_hashX)
@@ -792,11 +1012,11 @@ class NSGANet(GeneticAlgorithm):
             offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
 
             if BENCHMARK_NAME == 'cifar10':
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.085)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.0835)[0]
             elif BENCHMARK_NAME == 'cifar100':
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.304)[0]
             else:
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.067)[0]
 
             offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
             offsprings.set('F', offsprings_predict_F)
@@ -807,9 +1027,11 @@ class NSGANet(GeneticAlgorithm):
             offsprings.set('F', offsprings_true_F)
 
         # update elitist archive - crossover
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F, self.dominated_idv = \
             update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
+                                   self.dominated_idv)
+
         # mutation
         offsprings = self._mutation(pop=pop, old_offsprings=offsprings, prob_mutation=0.1)
 
@@ -817,11 +1039,11 @@ class NSGANet(GeneticAlgorithm):
         if self.using_surrogate_model:
             offsprings_predict_F = self.fake_evaluate(X=offsprings.get('X'))
             if BENCHMARK_NAME == 'cifar10':
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.085)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.0835)[0]
             elif BENCHMARK_NAME == 'cifar100':
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.304)[0]
             else:
-                idxs = np.where(offsprings_predict_F[:, 1] < 0.305)[0]
+                idxs = np.where(offsprings_predict_F[:, 1] < 0.067)[0]
 
             offsprings_predict_F[idxs] = self.true_evaluate(X=offsprings.get('X')[idxs])
             offsprings.set('F', offsprings_predict_F)
@@ -832,9 +1054,10 @@ class NSGANet(GeneticAlgorithm):
             offsprings.set('F', offsprings_true_F)
 
         # update elitist archive - mutation
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F, self.dominated_idv = \
             update_elitist_archive(offsprings.get('X'), offsprings.get('hashX'), offsprings_true_F,
-                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+                                   self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
+                                   self.dominated_idv)
 
         return offsprings
 
@@ -865,9 +1088,10 @@ class NSGANet(GeneticAlgorithm):
             pop[front_0] = pareto_front
 
             # update elitist archive - local search on pareto front
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F, self.dominated_idv = \
                 update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
+                                       self.dominated_idv)
 
         # local search on knee solutions
         if LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
@@ -931,9 +1155,10 @@ class NSGANet(GeneticAlgorithm):
                     self.local_search_on_X(pop, X=knee_solutions, ls_on_knee_solutions=True)
 
             # update elitist archive - local search on knee solutions
-            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+            self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F, self.dominated_idv = \
                 update_elitist_archive(non_dominance_X, non_dominance_hashX, non_dominance_F,
-                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F)
+                                       self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
+                                       self.dominated_idv)
 
             pareto_front[idx_knee_solutions] = knee_solutions
 
@@ -948,11 +1173,10 @@ class NSGANet(GeneticAlgorithm):
         self.pop = self._initialize_custom()
 
         # update elitist archive - initialize
-        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F = \
+        self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F, self.dominated_idv = \
             update_elitist_archive(self.pop.get('X'), self.pop.get('hashX'), self.pop.get('F'),
                                    self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F,
-                                   first=True)
-
+                                   self.dominated_idv, first=True)
         self._do_each_gen()
 
         while self.no_evaluations < self.max_no_evaluations:
@@ -979,7 +1203,10 @@ class NSGANet(GeneticAlgorithm):
                 self.models_for_training = np.array(self.models_for_training)[idxs[500:]].tolist()
 
             y = self.true_evaluate(x, count_n_evaluations=True)[:, 1]
-            self.surrogate_model.fit(x=encode(x), y=y)
+            if BENCHMARK_NAME == 'cifar10' or BENCHMARK_NAME == 'cifar100':
+                self.surrogate_model.fit(x=encode(x), y=y)
+            else:
+                self.surrogate_model.fit(x=x, y=y)
 
             if DEBUG:
                 print('Update surrogate model - Done')
@@ -1000,10 +1227,14 @@ class NSGANet(GeneticAlgorithm):
                 if self.no_evaluations == self.no_eval[-1]:
                     self.dpfs[-1] = dpfs
                 else:
+                    if DEBUG:
+                        print('number of local searches:', self.no_evaluations - self.no_eval[-1] - 200)
                     self.dpfs.append(dpfs)
                     self.no_eval.append(self.no_evaluations)
 
     def _finalize(self):
+        pk.dump([self.elitist_archive_X, self.elitist_archive_hashX, self.elitist_archive_F],
+                open(self.path + '/pareto_front.p', 'wb'))
         if SAVE:
             # visualize DPFS
             pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
@@ -1028,129 +1259,6 @@ class NSGANet(GeneticAlgorithm):
             plt.grid()
             plt.savefig(f'{self.path}/final_pf')
             plt.clf()
-
-
-# ---------------------------------------------------------------------------------------------------------
-# Binary Tournament Selection Function
-# ---------------------------------------------------------------------------------------------------------
-
-
-def binary_tournament(pop, P, algorithm):
-    if P.shape[1] != 2:
-        raise ValueError("Only implemented for binary tournament!")
-    tournament_type = algorithm.tournament_type
-    S = np.full(P.shape[0], np.nan)
-    for i in range(P.shape[0]):
-
-        a, b = P[i, 0], P[i, 1]
-
-        if tournament_type == 'comp_by_dom_and_crowding':
-            rel = Dominator.get_relation(pop[a].F, pop[b].F)
-            if rel == 1:
-                S[i] = a
-            elif rel == -1:
-                S[i] = b
-
-        elif tournament_type == 'comp_by_rank_and_crowding':
-            S[i] = compare(a, pop[a].rank, b, pop[b].rank,
-                           method='smaller_is_better')
-
-        else:
-            raise Exception("Unknown tournament type.")
-
-        if np.isnan(S[i]):
-            S[i] = compare(a, pop[a].get("crowding"), b, pop[b].get("crowding"),
-                           method='larger_is_better', return_random_if_equal=True)
-    return S[:, None].astype(np.int)
-
-
-# ---------------------------------------------------------------------------------------------------------
-# Survival Selection
-# ---------------------------------------------------------------------------------------------------------
-
-
-class RankAndCrowdingSurvival:
-
-    @staticmethod
-    def do(pop, n_survive):
-        # get the objective space values and objects
-        F = pop.get('F')
-
-        # the final indices of surviving individuals
-        survivors = []
-
-        # do the non-dominated sorting until splitting front
-        fronts = NonDominatedSorting().do(F, n_stop_if_ranked=n_survive)
-
-        for k, front in enumerate(fronts):
-
-            # calculate the crowding distance of the front
-            crowding_of_front = calc_crowding_distance(F[front, :])
-
-            # save rank and crowding in the individual class
-            for j, i in enumerate(front):
-                pop[i].set('rank', k)
-                pop[i].set('crowding', crowding_of_front[j])
-
-            # current front sorted by crowding distance if splitting
-            if len(survivors) + len(front) > n_survive:
-                I = randomized_argsort(crowding_of_front, order='descending', method='numpy')
-                I = I[:(n_survive - len(survivors))]
-
-            # otherwise take the whole front unsorted
-            else:
-                I = np.arange(len(front))
-
-            # extend the survivors by all or selected individuals
-            survivors.extend(front[I])
-        return pop[survivors]
-
-
-def calc_crowding_distance(F):
-    infinity = 1e+14
-
-    n_points = F.shape[0]
-    n_obj = F.shape[1]
-
-    if n_points <= 2:
-        return np.full(n_points, infinity)
-    else:
-
-        # sort each column and get index
-        I = np.argsort(F, axis=0, kind='mergesort')
-
-        # now really sort the whole array
-        F = F[I, np.arange(n_obj)]
-
-        # get the distance to the last element in sorted list and replace zeros with actual values
-        dist = np.concatenate([F, np.full((1, n_obj), np.inf)]) - np.concatenate([np.full((1, n_obj), -np.inf), F])
-
-        index_dist_is_zero = np.where(dist == 0)
-
-        dist_to_last = np.copy(dist)
-        for i, j in zip(*index_dist_is_zero):
-            dist_to_last[i, j] = dist_to_last[i - 1, j]
-
-        dist_to_next = np.copy(dist)
-        for i, j in reversed(list(zip(*index_dist_is_zero))):
-            dist_to_next[i, j] = dist_to_next[i + 1, j]
-
-        # normalize all the distances
-        norm = np.max(F, axis=0) - np.min(F, axis=0)
-        norm[norm == 0] = np.nan
-        dist_to_last, dist_to_next = dist_to_last[:-1] / norm, dist_to_next[1:] / norm
-
-        # if we divided by zero because all values in one columns are equal replace by none
-        dist_to_last[np.isnan(dist_to_last)] = 0.0
-        dist_to_next[np.isnan(dist_to_next)] = 0.0
-
-        # sum up the distance to next and last and norm by objectives - also reorder from sorted list
-        J = np.argsort(I, axis=0)
-        crowding = np.sum(dist_to_last[J, np.arange(n_obj)] + dist_to_next[J, np.arange(n_obj)], axis=1) / n_obj
-
-    # replace infinity with a large number
-    crowding[np.isinf(crowding)] = infinity
-    return crowding
 
 
 if __name__ == '__main__':
@@ -1179,7 +1287,7 @@ if __name__ == '__main__':
     # parser.add_argument('--using_surrogate_model', type=int, default=0)
     # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
     # args = parser.parse_args()
-
+    ''' ------- '''
     # user_input = [[0, 0, 0, 0],
     #               [1, 0, 1, 0],
     #               [1, 0, 2, 0],
@@ -1189,40 +1297,35 @@ if __name__ == '__main__':
     #               [1, 0, 2, 1],
     #               [0, 1, 1, 1],
     #               [0, 1, 2, 1]]
+    user_input = [[0, 0, 0, 0, '2X', 1, 10]]
 
-    user_input = [[0, 1, 1, 0]]
+    PATH_DATA = 'D:/Files'
 
-    BENCHMARK_NAME = 'cifar100'
-
+    BENCHMARK_NAME = 'nas101'
     if BENCHMARK_NAME == 'nas101':
         BENCHMARK_API = api.NASBench_()
-        BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/101_benchmark/nas101.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/101_benchmark/min_max_NAS101.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/101_benchmark/pf_validation_parameters.p', 'rb'))
 
     elif BENCHMARK_NAME == 'cifar10':
-        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/cifar10.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
 
     else:
-        BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/cifar100.p', 'rb'))
+        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
+        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
 
     BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
     print('--> Load benchmark - Done')
 
     SAVE = True
-    DEBUG = False
-    MAX_NO_EVALUATIONS = 10000
+    DEBUG = True
 
     ALGORITHM_NAME = 'nsga'
     POP_SIZE = 100
-    CROSSOVER_TYPE = 'UX'
-
-    USING_SURROGATE_MODEL = True
-    UPDATE_MODEL_AFTER_N_GENS = 10
 
     NUMBER_OF_RUNS = 10
     INIT_SEED = 0
@@ -1235,19 +1338,19 @@ if __name__ == '__main__':
         #
         # if BENCHMARK_NAME == 'nas101':
         #     BENCHMARK_API = api.NASBench_()
-        #     BENCHMARK_DATA = pk.load(open('101_benchmark/nas101.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('101_benchmark/min_max_NAS101.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('101_benchmark/pf_validation_parameters.p', 'rb'))
+        #     BENCHMARK_DATA = pk.load(open(PATH_DATA + '/101_benchmark/nas101.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/101_benchmark/min_max_NAS101.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/101_benchmark/pf_validation_parameters.p', 'rb'))
         #
         # elif BENCHMARK_NAME == 'cifar10':
-        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar10/cifar10.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
+        #     BENCHMARK_DATA = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/cifar10.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/min_max_cifar10.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar10/pf_validation_MMACs_cifar10.p', 'rb'))
         #
-        # elif BENCHMARK_NAME == 'cifar100':
-        #     BENCHMARK_DATA = pk.load(open('bosman_benchmark/cifar100/cifar100.p', 'rb'))
-        #     BENCHMARK_MIN_MAX = pk.load(open('bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
-        #     BENCHMARK_PF_TRUE = pk.load(open('bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
+        # else:
+        #     BENCHMARK_DATA = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/cifar100.p', 'rb'))
+        #     BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/min_max_cifar100.p', 'rb'))
+        #     BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/bosman_benchmark/cifar100/pf_validation_MMACs_cifar100.p', 'rb'))
         #
         # BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1] = BENCHMARK_PF_TRUE[:, 1], BENCHMARK_PF_TRUE[:, 0].copy()
         # print('--> Load benchmark - Done')
@@ -1265,17 +1368,27 @@ if __name__ == '__main__':
         # LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(args.local_search_on_knees)
         # LOCAL_SEARCH_ON_N_POINTS = args.local_search_on_n_points
         # LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(args.followed_bosman_paper)
-
-        LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
-        LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
-        LOCAL_SEARCH_ON_N_POINTS = _input[2]
-        LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
-
+        #
         # USING_SURROGATE_MODEL = bool(args.using_surrogate_model)
         # UPDATE_MODEL_AFTER_N_GENS = args.update_model_after_n_gens
         #
         # NUMBER_OF_RUNS = args.number_of_runs
         # INIT_SEED = args.seed
+
+        CROSSOVER_TYPE = _input[4]
+
+        USING_SURROGATE_MODEL = bool(_input[-2])
+        UPDATE_MODEL_AFTER_N_GENS = _input[-1]
+
+        if USING_SURROGATE_MODEL:
+            MAX_NO_EVALUATIONS = 10000
+        else:
+            MAX_NO_EVALUATIONS = 10000
+
+        LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
+        LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
+        LOCAL_SEARCH_ON_N_POINTS = _input[2]
+        LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
 
         now = datetime.now()
         dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
@@ -1283,7 +1396,7 @@ if __name__ == '__main__':
                                 f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
                                 f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
                                 f'd%d_m%m_H%H_M%M')
-        ROOT_PATH = dir_name
+        ROOT_PATH = PATH_DATA + '/results/' + dir_name
 
         # Create root folder
         os.mkdir(ROOT_PATH)
