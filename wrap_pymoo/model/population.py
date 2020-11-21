@@ -1,6 +1,5 @@
 import numpy as np
 from wrap_pymoo.model.individual import MyIndividual as Individual
-from pymoo.model.population import Population
 
 
 class MyPopulation(np.ndarray):
@@ -74,8 +73,6 @@ class MyPopulation(np.ndarray):
             return np.array(res[0])
         else:
             return tuple(res)
-
-        return np.array(val)
 
     def __array_finalize__(self, obj):
         if obj is None:

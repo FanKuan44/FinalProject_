@@ -20,17 +20,20 @@ class MySampling:
 
     def _sampling(self, n_samples):
         pop = Population(n_samples)
+        print(len(pop))
         pop_X, pop_hashX = [], []
 
         if self.benchmark_name == 'cifar10' or self.benchmark_name == 'cifar100':
             allowed_choices = ['I', '1', '2']
 
-            while len(pop_X) < n_samples:
+            i = 0
+            while i < n_samples:
                 new_X = np.random.choice(allowed_choices, 14)
                 new_hashX = convert_X_to_hashX(new_X)
                 if new_hashX not in pop_hashX:
-                    pop_X.append(new_X)
-                    pop_hashX.append(new_hashX)
+                    pop[i].set('X', new_X)
+                    pop[i].set('hashX', new_hashX)
+                    i += 1
 
         else:
             while len(pop_X) < n_samples:
@@ -48,7 +51,10 @@ class MySampling:
                         pop_X.append(X)
                         pop_hashX.append(hashX)
 
-        pop.set('X', pop_X)
-        pop.set('hashX', pop_hashX)
-
         return pop
+
+
+if __name__ == '__main__':
+    s = MySampling('cifar10')
+    pop = s._sampling(10)
+    print(pop[0].get('X'))

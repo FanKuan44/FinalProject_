@@ -55,7 +55,7 @@ class MLP:
     def fit(self, **kwargs):
         self.model = train(self.model, **kwargs)
 
-    def predict(self, test_data, device='cpu'):
+    def predict(self, test_data, device='cuda'):
         return predict(self.model, test_data, device=device)
 
 

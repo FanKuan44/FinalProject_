@@ -203,17 +203,16 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
-        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-        #     label_ = 'NSGA (original) (max no.evaluations: 3e4)'
-        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-        #     label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
-        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-        #     label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
-        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-        #     label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
-        #              f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
-        # else:
-        label_ = label
+        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA: ORIGINAL'
+        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA: USE SURROGATE MODEL'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA: IMPROVE POTENTIAL SOLUTIONS'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA: USE SURROGATE MODEL + IMPROVE POTENTIAL SOLUTIONS'
+        else:
+            label_ = label
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
 
@@ -363,17 +362,16 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
 
     for i in range(len(paths)):
         label = paths[i].split('_')[1:-4]
-        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-        #     label_ = 'NSGA (original) (max no.evaluations: 3e4)'
-        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-        #     label_ = f'NSGA using \"surrogate model (update model each {int(label[-1])} gens)\" (max no.evaluations: 1e4)'
-        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-        #     label_ = 'NSGA using \"local search on knee solutions\" (max no.evaluations: 3e4)'
-        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-        #     label_ = f'NSGA using both of \"local search on knee solutions\" and \"surrogate model ' \
-        #              f'(update model each {int(label[-1])} gens\") (max no.evaluations: 1e4)'
-        # else:
-        label_ = label
+        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA: ORIGINAL'
+        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA: USE SURROGATE MODEL'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+            label_ = 'NSGA: IMPROVE POTENTIAL SOLUTIONS'
+        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+            label_ = f'NSGA: USE SURROGATE MODEL + IMPROVE POTENTIAL SOLUTIONS'
+        else:
+            label_ = label
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
     if log_x:

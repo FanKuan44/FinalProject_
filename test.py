@@ -35,12 +35,14 @@ if __name__ == '__main__':
     # print(len(pf_X), len(pf_hashX), len(np.unique(pf_F, axis=0)))
     # plt.scatter(pf_F[:, 0], pf_F[:, 1])
     # plt.show()
-    data = pk.load(open('D:/files/101_benchmark/nas101.p', 'rb'))
-    count = 0
-    total = 0
-    for key in data.keys():
-        if 1 - data[key]['val_acc'] < 0.067:
-            count += 1
-        total += 1
-    print(count / total * 100, '%')
-    exit()
+    # data = pk.load(open('D:/files/101_benchmark/nas101.p', 'rb'))
+    # count = 0
+    # total = 0
+    # for key in data.keys():
+    #     if 1 - data[key]['val_acc'] < 0.067:
+    #         count += 1
+    #     total += 1
+    # print(count / total * 100, '%')
+    # exit()
+    x = np.array([3, 6, 2, 1])
+    print(x[np.where(x < 0.0000)[0]])

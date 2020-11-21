@@ -1,5 +1,4 @@
 import numpy as np
-
 from wrap_pymoo.util.compare import find_better_idv
 
 
@@ -8,7 +7,6 @@ def update_elitist_archive(new_idv_X_lst, new_idv_hashX_lst, new_idv_F_lst,
                            isDominated_hashX, first=False):
     """
     Update elitist archive and get the dominated individuals
-
     :param new_idv_X_lst: List of Individuals need to checked (X)
     :param new_idv_hashX_lst: List of Individuals need to checked (hashX)
     :param new_idv_F_lst: List of Individuals need to checked (F)
@@ -17,7 +15,6 @@ def update_elitist_archive(new_idv_X_lst, new_idv_hashX_lst, new_idv_F_lst,
     :param elitist_archive_F: Current Elitist Archive (F)
     :param isDominated_hashX: Current List of Dominated Individuals
     :param first: Using to check type of current Elitist Archive is 'list' or not?
-
     :returns: current_elitist_archive_X, current_elitist_archive_X, current_elitist_archive_X, current_elitist_archive_hashX, current_elitist_archive_F, isDominated_hashX
     """
     if first:
@@ -61,3 +58,4 @@ def update_elitist_archive(new_idv_X_lst, new_idv_hashX_lst, new_idv_F_lst,
            current_elitist_archive_hashX, \
            current_elitist_archive_F, \
            current_isDominated_hashX
+
