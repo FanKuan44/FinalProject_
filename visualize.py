@@ -163,7 +163,6 @@ def get_avg_dpfs_and_no_evaluations(paths):
         for i in range(number_of_experiments):
             path_ = path + f'/{i}'
             total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_dpfs.p', 'rb'))
-
             no_evaluations_gen_0 = total_no_evaluations[0]
             min_total_no_evaluations = min(min_total_no_evaluations, total_no_evaluations[-1])
 
@@ -175,8 +174,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
             total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_dpfs.p', 'rb'))
 
             # Interpolation
-            new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1,
-                                             50)
+            new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1, no_evaluations_gen_0//2)
 
             f = interp1d(total_no_evaluations, total_dpfs)
             new_dpf_each_gen = f(new_no_eval_each_gen)
@@ -184,8 +182,12 @@ def get_avg_dpfs_and_no_evaluations(paths):
             dpfs_each_exp.append(new_dpf_each_gen)
             no_evaluations_each_exp.append(new_no_eval_each_gen)
 
+            print(new_no_eval_each_gen)
+
         dpfs_each_exp = np.array(dpfs_each_exp)
         no_evaluations_each_exp = np.array(no_evaluations_each_exp)
+
+        pickle.dump([dpfs_each_exp, no_evaluations_each_exp], open(f'{FOLDER}/DPFS/{path.split("/")[-1]}_dpfs.p', 'wb'))
 
         dpf_avg = np.sum(dpfs_each_exp, axis=0) / len(dpfs_each_exp)
         no_eval_avg = np.sum(no_evaluations_each_exp, axis=0) / len(no_evaluations_each_exp)
@@ -202,17 +204,19 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     axis_lbs = ['No.Evaluations', 'DPFS']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:-4]
-        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA: ORIGINAL'
-        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA: USE SURROGATE MODEL'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA: IMPROVE POTENTIAL SOLUTIONS'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA: USE SURROGATE MODEL + IMPROVE POTENTIAL SOLUTIONS'
-        else:
-            label_ = label
+        print(paths[i].split('_'))
+        label = paths[i].split('_')[1:]
+        # label = paths[i].split('_')[1:-4]
+        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA-II original'
+        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA-II with Using Surrogate Model'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = f'NSGA-II with IPS k = {int(label[5])}'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA-II with Using Surrogate Model + IPS k = {int(label[5])}'
+        # else:
+        label_ = label
         visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
 
@@ -222,7 +226,8 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     if log_y:
         plt.yscale('log')
     title = paths[-1].split('_')[0].split('/')[-1]
-    plt.title(title + ' - pop size: 100')
+    pop_size = paths[-1].split('_')[2]
+    plt.title(title + f' - pop size: {pop_size}')
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
@@ -286,7 +291,6 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
 
         for folder_i in range(number_of_folders):
             path_ = path + f'/{folder_i}/pf_eval'
-
             pf_and_eval_folder = os.listdir(path_)
 
             # Sort files by name
@@ -329,7 +333,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
                         no_eval_each_gen.append(no_eval)
 
             # Interpolation
-            new_no_eval_each_gen = np.arange(eval_gen_0, upper + 1, 50)
+            new_no_eval_each_gen = np.arange(eval_gen_0, upper + 1, eval_gen_0//2)
 
             f = interp1d(no_eval_each_gen, hp_each_gen)
             new_hp_each_gen = f(new_no_eval_each_gen)
@@ -340,7 +344,10 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
         hp_each_exp = np.array(hp_each_exp)
         no_eval_each_exp = np.array(no_eval_each_exp)
 
+        pickle.dump([hp_each_exp, no_eval_each_exp], open(f'{FOLDER}/HP/{path.split("/")[-1]}_hp.p', 'wb'))
+
         hp_avg = np.sum(hp_each_exp, axis=0) / len(hp_each_exp)
+
         no_eval_avg = np.sum(no_eval_each_exp, axis=0) / len(no_eval_each_exp)
 
         hp_avg_each_path.append(hp_avg)
@@ -350,8 +357,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
 
 
 def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
-    min_f0, max_f0, min_f1, max_f1 = find_max_f0_f1_min_f0_f1(paths)
-
+    _, max_f0, _, max_f1 = find_max_f0_f1_min_f0_f1(paths)
     rf = [max_f0 + 1e-5, max_f1 + 1e-5]
     hp_calculate = _HyperVolume(rf)
 
@@ -361,17 +367,18 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
     axis_lbs = ['No.Evaluations', 'Hypervolume']
 
     for i in range(len(paths)):
-        label = paths[i].split('_')[1:-4]
-        if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA: ORIGINAL'
-        elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA: USE SURROGATE MODEL'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
-            label_ = 'NSGA: IMPROVE POTENTIAL SOLUTIONS'
-        elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
-            label_ = f'NSGA: USE SURROGATE MODEL + IMPROVE POTENTIAL SOLUTIONS'
-        else:
-            label_ = label
+        label = paths[i].split('_')[1:]
+        # label = paths[i].split('_')[1:-4]
+        # if label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = 'NSGA-II original'
+        # elif label[3] == 'False' and label[4] == 'False' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA-II with Using Surrogate Model'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'False':
+        #     label_ = f'NSGA-II with IPS k = {int(label[5])}'
+        # elif label[3] == 'False' and label[4] == 'True' and label[6] == 'False' and label[7] == 'True':
+        #     label_ = f'NSGA-II with Using Surrogate Model + IPS k = {int(label[5])}'
+        # else:
+        label_ = label
         visualize_2d(objective_0=no_eval_avg_each_path[i], objective_1=hp_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
     if log_x:
@@ -380,7 +387,8 @@ def visualize_hp_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=F
         plt.yscale('log')
     plt.grid()
     title = paths[-1].split('_')[0].split('/')[-1]
-    plt.title(title + ' - pop size: 100')
+    pop_size = paths[-1].split('_')[2]
+    plt.title(title + f' - pop size: {pop_size}')
     if save_fig:
         plt.savefig('fig/' + dir_name + '/' + 'hp_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
@@ -396,6 +404,8 @@ def main():
     paths = []
     for path in os.listdir(FOLDER):
         paths.append(FOLDER + '/' + path)
+    os.mkdir(FOLDER + '/' + 'DPFS')
+    os.mkdir(FOLDER + '/' + 'HP')
 
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
 
@@ -409,7 +419,7 @@ if __name__ == '__main__':
     SAVE = False
     LOG_X = True
     LOG_Y = False
-    FOLDER = 'D:/files/running'
+    FOLDER = 'D:/Files/running/NAS-Bench-201-ImageNet16-120-Final'
     if SAVE:
         now = datetime.now()
         dir_name = now.strftime('%d_%m_%Y_%H_%M_%S')

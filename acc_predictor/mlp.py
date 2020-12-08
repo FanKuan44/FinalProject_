@@ -98,8 +98,8 @@ def train(net, x, y, trn_split=0.8, pretrained=None, device='cuda',
             loss_vld = infer(net, inputs[vld_idx], target[vld_idx], criterion, device)
             scheduler.step()
 
-            # if epoch % 500 == 0 and verbose:
-            #     print("Epoch {:4d}: trn loss = {:.4E}, vld loss = {:.4E}".format(epoch, loss_trn, loss_vld))
+            if epoch % 500 == 0 and verbose:
+                print("Epoch {:4d}: trn loss = {:.4E}, vld loss = {:.4E}".format(epoch, loss_trn, loss_vld))
 
             if loss_vld < best_loss:
                 best_loss = loss_vld
