@@ -14,7 +14,6 @@ from pymoo.operators.default_operators import set_if_none
 from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
 from pymoo.operators.sampling.random_sampling import RandomSampling
 from pymoo.operators.selection.tournament_selection import TournamentSelection
-from pymoo.rand import random
 from pymoo.util.display import disp_multi_objective
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
 # =========================================================================================================
@@ -157,6 +156,8 @@ class NSGANet(GeneticAlgorithm):
         self.path = path
 
         self.F_total = []
+        self.worst_f0 = -np.inf
+        self.worst_f1 = -np.inf
 
     def update_fake_A(self, new_solution):
         X = new_solution.get('X')
@@ -278,7 +279,6 @@ class NSGANet(GeneticAlgorithm):
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
-                    # if F[1] < 0.106:
                     twice = True
                     F[1] = np.round(1 - BENCHMARK_DATA[hashX]['test-accuracy'] / 100, 6)
                     self.nEs += 1
@@ -295,7 +295,6 @@ class NSGANet(GeneticAlgorithm):
                                 (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
                 F[1] = self.surrogate_model.predict(np.array([X]))[0][0]
 
-                # if F[1] < 0.067:
                 if F[1] < self.alpha:
                     twice = True
                     F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
@@ -661,7 +660,6 @@ class NSGANet(GeneticAlgorithm):
             ops = ['I', '1', '2']
         else:
             ops = ['0', '1', '2', '3', '4']
-            # m_searches = 24
 
         for i in range(len(S)):
             # Avoid stuck because don't find any better architecture
@@ -803,10 +801,7 @@ class NSGANet(GeneticAlgorithm):
 
         idx_S = np.array(angle[:, 1], dtype=np.int)
         S = PF[idx_S].copy()
-        # plt.scatter(PF.get('F')[:, 0], PF.get('F')[:, 1], facecolors='none', edgecolors='red', s=30)
-        # plt.scatter(S.get('F')[:, 0], S.get('F')[:, 1], s=10)
-        # plt.savefig(f'{self.path}/visualize_pf_each_gen/{self.n_gen}')
-        # plt.clf()
+
         S = self.local_search_on_X(P, X=S, ls_on_knee_solutions=True)
 
         PF[idx_S] = S
@@ -834,24 +829,13 @@ class NSGANet(GeneticAlgorithm):
         # selecting
         pop = self.survival.do(pop, self.pop_size)
 
-        # local search on pareto front
-        if LOCAL_SEARCH_ON_PARETO_FRONT:
-            pop_F = pop.get('F')
-
-            front_0 = NonDominatedSorting().do(pop_F, n_stop_if_ranked=self.pop_size, only_non_dominated_front=True)
-
-            pareto_front = pop[front_0].copy()
-
-            pareto_front = self.local_search_on_X(pop, X=pareto_front)
-            pop[front_0] = pareto_front
-
         if LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
             pop = self.improve_potential_solutions(P=pop)
 
         return pop
 
     def solve_custom(self):
-        self.n_gen = 1
+        self.n_gen = 0
 
         # initialize
         self.pop = self._initialize_custom()
@@ -859,9 +843,9 @@ class NSGANet(GeneticAlgorithm):
         self._do_each_gen(first=True)
 
         while self.nEs < self.m_nEs:
-            if self.dpfs[-1] != 0.0:
-                self.n_gen += 1
+            self.n_gen += 1
 
+            if self.dpfs[-1] != 0.0:
                 self.pop = self._next(self.pop)
             else:
                 self.nEs += self.pop_size
@@ -872,88 +856,59 @@ class NSGANet(GeneticAlgorithm):
 
     def _do_each_gen(self, first=False):
         if self.using_surrogate_model:
-            # accuracy = np.array(self.A_F)[:, 1]
-            # if self.nEs // self.m_nEs >= 5/6:
-            #     idx = len(accuracy) * 100 // 100
-            # elif self.nEs // self.m_nEs >= 4/6:
-            #     idx = len(accuracy) * 70 // 100
-            # elif self.nEs // self.m_nEs >= 3/6:
-            #     idx = len(accuracy) * 50 // 100
-            # elif self.nEs // self.m_nEs >= 2/6:
-            #     idx = len(accuracy) * 30 // 100
-            # else:
-            #     idx = len(accuracy) * 10 // 100
-            idx = len(self.F_total) * 10 // 100
-            accuracy = sorted(self.F_total)
-            # print(accuracy)
-            self.alpha = accuracy[idx]
-            # print(self.alpha)
-        # if not first:
-        #     tmp_A_F = np.array(self.tmp_A_F)
-        #     plt.scatter(tmp_A_F[:, 0], tmp_A_F[:, 1], c='blue', s=15)
-        #     plt.scatter(BENCHMARK_PF_TRUE[:, 0], BENCHMARK_PF_TRUE[:, 1], facecolors='none', edgecolors='red', s=30)
-        #
-        #     for x in np.array(self.tmp_A_X):
-        #         F, _ = self.evaluate(x, using_surrogate_model=False, count_nE=False)
-        #         plt.scatter(F[0], F[1], c='red', s=15)
-        #     plt.savefig(f'{self.path}/visualize_pf_each_gen/tmp_A_{self.n_gen}')
-        #     plt.clf()
-        """ ------------------------- """
-        if self.m_nEs - self.nEs < 2 * self.m_nEs // 3 or self.n_updates == 10:
-            self.update_model = False
-        """ ------------------------- """
-        if self.using_surrogate_model and not first:
-            tmp_set_X = np.array(self.tmp_A_X)
-            tmp_set_hashX = np.array(self.tmp_A_hashX)
+            self.alpha = np.mean(self.F_total)
 
-            tmp_set = Population(len(self.tmp_A_X))
-            tmp_set.set('X', tmp_set_X)
-            tmp_set.set('hashX', tmp_set_hashX)
-            for i in range(len(tmp_set)):
-                if (tmp_set[i].get('hashX') not in self.A_hashX) and (tmp_set[i].get('hashX') not in self.DS):
-                    F, _ = self.evaluate(tmp_set[i].get('X'), using_surrogate_model=False, count_nE=True)
-                    tmp_set[i].set('F', F)
-                    self.update_A(tmp_set[i])
-        """ ------------------------- """
-        if self.using_surrogate_model and (self.n_gen % self.update_model_after_n_gens == 0):
-            # print('update')
-            data = np.array(self.training_data)
-            self.training_data = []
+            if self.m_nEs - self.nEs < 2 * self.m_nEs // 3 or self.n_updates == 15:
+                self.update_model = False
 
-            X = []
-            Y = []
-            checked = []
-            for i in range(len(data)):
-                if BENCHMARK_NAME == 'NAS-Bench-101':
-                    matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(data[i].get('X'))
+            if not first:
+                tmp_set_X = np.array(self.tmp_A_X)
+                tmp_set_hashX = np.array(self.tmp_A_hashX)
 
-                    matrix_2D = encoding_matrix(matrix_1D)
-                    ops_STRING = encoding_ops(ops_INT)
-                    modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
-                    hashX = BENCHMARK_API.get_module_hash(modelspec)
-                else:
-                    hashX = convert_to_hashX(data[i].get('X'), BENCHMARK_NAME)
-                if (hashX not in checked) and (hashX not in self.DS) and (hashX not in self.A_hashX):
-                    checked.append(hashX)
-                    F, _ = self.evaluate(data[i].get('X'), using_surrogate_model=False, count_nE=True)
-                    data[i].set('F', F)
-                    self.update_A(data[i])
-                    X.append(data[i].get('X'))
-                    Y.append(F[1])
-            for i in range(len(self.A_X)):
-                X.append(self.A_X[i])
-                Y.append(self.A_F[i][1])
-            X = np.array(X)
-            Y = np.array(Y)
-            if self.update_model:
-                self.n_updates += 1
-                if BENCHMARK_NAME == 'NAS-Bench-101':
-                    self.surrogate_model.fit(x=X, y=Y)
-                else:
-                    self.surrogate_model.fit(x=encode(X, BENCHMARK_NAME), y=Y, verbose=False)
+                tmp_set = Population(len(self.tmp_A_X))
+                tmp_set.set('X', tmp_set_X)
+                tmp_set.set('hashX', tmp_set_hashX)
+                for i in range(len(tmp_set)):
+                    if (tmp_set[i].get('hashX') not in self.A_hashX) and (tmp_set[i].get('hashX') not in self.DS):
+                        F, _ = self.evaluate(tmp_set[i].get('X'), using_surrogate_model=False, count_nE=True)
+                        tmp_set[i].set('F', F)
+                        self.update_A(tmp_set[i])
 
-            if DEBUG:
-                print('Update surrogate model - Done')
+            if self.n_gen % self.update_model_after_n_gens == 0:
+                data = np.array(self.training_data)
+                self.training_data = []
+
+                X = []
+                Y = []
+                checked = []
+                for i in range(len(data)):
+                    if BENCHMARK_NAME == 'NAS-Bench-101':
+                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(data[i].get('X'))
+
+                        matrix_2D = encoding_matrix(matrix_1D)
+                        ops_STRING = encoding_ops(ops_INT)
+                        modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                        hashX = BENCHMARK_API.get_module_hash(modelspec)
+                    else:
+                        hashX = convert_to_hashX(data[i].get('X'), BENCHMARK_NAME)
+                    if (hashX not in checked) and (hashX not in self.DS) and (hashX not in self.A_hashX):
+                        checked.append(hashX)
+                        F, _ = self.evaluate(data[i].get('X'), using_surrogate_model=False, count_nE=True)
+                        data[i].set('F', F)
+                        self.update_A(data[i])
+                        X.append(data[i].get('X'))
+                        Y.append(F[1])
+                for i in range(len(self.A_X)):
+                    X.append(self.A_X[i])
+                    Y.append(self.A_F[i][1])
+                X = np.array(X)
+                Y = np.array(Y)
+                if self.update_model:
+                    self.n_updates += 1
+                    if BENCHMARK_NAME == 'NAS-Bench-101':
+                        self.surrogate_model.fit(x=X, y=Y)
+                    else:
+                        self.surrogate_model.fit(x=encode(X, BENCHMARK_NAME), y=Y, verbose=False)
 
         if DEBUG:
             print(f'Number of evaluations used: {self.nEs}/{self.m_nEs}')
@@ -963,6 +918,8 @@ class NSGANet(GeneticAlgorithm):
             pf = np.unique(pf, axis=0)
             pf = pf[np.argsort(pf[:, 0])]
             pk.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+            self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
+            self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
 
             dpfs = round(cal_dpfs(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE), 6)
             print(self.nEs, dpfs)
@@ -975,7 +932,6 @@ class NSGANet(GeneticAlgorithm):
                 else:
                     self.dpfs.append(dpfs)
                     self.no_eval.append(self.nEs)
-        self.training_data = []
 
     def _finalize(self):
         self.A_X = np.array(self.A_X)
@@ -985,6 +941,7 @@ class NSGANet(GeneticAlgorithm):
         pk.dump([self.A_X, self.A_hashX, self.A_F],
                 open(self.path + '/pareto_front.p', 'wb'))
         if SAVE:
+            pk.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
             # visualize DPFS
             pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
             plt.plot(self.no_eval, self.dpfs)
@@ -1051,12 +1008,10 @@ if __name__ == '__main__':
     NUMBER_OF_RUNS = 21
     INIT_SEED = 0
 
-    problems = ['MacroNAS-CIFAR-10', 'MacroNAS-CIFAR-100', 'NAS-Bench-101']
-    # print('MIXED 10(1/6) - 10(reverse)(5/6)')
+    problems = ['NAS-Bench-101']
+
     for BENCHMARK_NAME in problems:
-        user_input = [[0, 0, 0, 0, '2X', 1, 10],
-                      [0, 1, 1, 0, '2X', 1, 10],
-                      [0, 1, 2, 0, '2X', 1, 10]]
+        user_input = [[1, 1, '2X', 1, 10]]
 
         PATH_DATA = 'D:/Files'
 
@@ -1102,20 +1057,21 @@ if __name__ == '__main__':
             MAX_NO_EVALUATIONS = 30000
 
         for _input in user_input:
-            CROSSOVER_TYPE = _input[4]
+            CROSSOVER_TYPE = _input[2]
 
             USING_SURROGATE_MODEL = bool(_input[-2])
             UPDATE_MODEL_AFTER_N_GENS = _input[-1]
+            if not USING_SURROGATE_MODEL:
+                UPDATE_MODEL_AFTER_N_GENS = 0
 
-            LOCAL_SEARCH_ON_PARETO_FRONT = bool(_input[0])
-            LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[1])
-            LOCAL_SEARCH_ON_N_POINTS = _input[2]
-            LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER = bool(_input[3])
+            LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[0])
+            LOCAL_SEARCH_ON_N_POINTS = _input[1]
+            if not LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
+                LOCAL_SEARCH_ON_N_POINTS = 0
 
             now = datetime.now()
             dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
-                                    f'{LOCAL_SEARCH_ON_PARETO_FRONT}_{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_'
-                                    f'{LOCAL_SEARCH_ON_N_POINTS}_{LOCAL_SEARCH_FOLLOWED_BOSMAN_PAPER}_'
+                                    f'{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_{LOCAL_SEARCH_ON_N_POINTS}_'
                                     f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
                                     f'd%d_m%m_H%H_M%M_S%S')
             ROOT_PATH = PATH_DATA + '/results/' + dir_name
@@ -1124,7 +1080,7 @@ if __name__ == '__main__':
             os.mkdir(ROOT_PATH)
             print(f'--> Create folder {ROOT_PATH} - Done\n')
 
-            for i_run in range(NUMBER_OF_RUNS):
+            for i_run in range(16, NUMBER_OF_RUNS):
                 SEED = INIT_SEED + i_run * 100
                 np.random.seed(SEED)
                 torch.random.manual_seed(SEED)
