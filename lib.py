@@ -16,9 +16,7 @@ from pymoo.operators.sampling.random_sampling import RandomSampling
 from pymoo.operators.selection.tournament_selection import TournamentSelection
 from pymoo.util.display import disp_multi_objective
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
-# =========================================================================================================
-# Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
-# =========================================================================================================
+
 from nasbench import wrap_api as api
 
 from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
@@ -27,7 +25,7 @@ from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 
 from wrap_pymoo.util.compare import find_better_idv
-from wrap_pymoo.util.igd_calculating import calc_igd
+from wrap_pymoo.util.IGD_calculating import calc_IGD
 from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
 from wrap_pymoo.util.survial_selection import RankAndCrowdingSurvival
 from wrap_pymoo.util.tournament_selection import binary_tournament

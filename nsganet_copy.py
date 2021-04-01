@@ -230,7 +230,7 @@ class NSGANet(GeneticAlgorithm):
 
                 F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
                                 (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
-                F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
+                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
 
             elif BENCHMARK_NAME == '101':
                 matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
@@ -260,13 +260,13 @@ class NSGANet(GeneticAlgorithm):
                 encode_X = encode(X, BENCHMARK_NAME)
                 hashX = ''.join(X.tolist())
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
+                                (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = round(1 - BENCHMARK_DATA[hashX]['val_acc'], 4)
+                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
                     self.nEs += 1
 
             elif BENCHMARK_NAME == '201_C10' or BENCHMARK_NAME == '201_C100' or BENCHMARK_NAME == '201__IN16_120':
@@ -355,7 +355,6 @@ class NSGANet(GeneticAlgorithm):
                     P[i].set('X', X)
                     P[i].set('hashX', hashX)
                     P[i].set('F', F)
-                    print('update_A ->', i)
                     self.update_A(P[i])
 
                     i += 1
@@ -919,14 +918,16 @@ class NSGANet(GeneticAlgorithm):
 
         if SAVE:
             pf = np.array(self.A_F)
-            # pf = np.unique(pf, axis=0)
+            pf = np.unique(pf, axis=0)
             pf = pf[np.argsort(pf[:, 0])]
-            pk.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+
+            p.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+            p.dump(self.A_X, open(f'{self.path}/elitist_archive/gen_{self.n_gen}.p', 'wb'))
+
             self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
             self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
 
-            IGD = round(cal_dpfs(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE), 6)
-            print(self.nEs, IGD)
+            IGD = round(calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE), 6)
             if len(self.no_eval) == 0:
                 self.IGD.append(IGD)
                 self.no_eval.append(self.nEs)
@@ -942,12 +943,11 @@ class NSGANet(GeneticAlgorithm):
         self.A_hashX = np.array(self.A_hashX)
         self.A_F = np.array(self.A_F)
 
-        pk.dump([self.A_X, self.A_hashX, self.A_F],
-                open(self.path + '/pareto_front.p', 'wb'))
+        p.dump([self.A_X, self.A_hashX, self.A_F], open(self.path + '/pareto_front.p', 'wb'))
         if SAVE:
-            pk.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
+            p.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
             # visualize IGD
-            pk.dump([self.no_eval, self.IGD], open(f'{self.path}/no_eval_and_IGD.p', 'wb'))
+            p.dump([self.no_eval, self.IGD], open(f'{self.path}/no_eval_and_IGD.p', 'wb'))
             plt.plot(self.no_eval, self.IGD)
             plt.xlabel('No.Evaluations')
             plt.ylabel('IGD')
@@ -962,14 +962,14 @@ class NSGANet(GeneticAlgorithm):
                         label='elitist archive')
 
             if BENCHMARK_NAME == '101':
-                plt.xlabel('params (normalize)')
-                plt.ylabel('valid-error')
+                plt.xlabel('Params (norm)')
+                plt.ylabel('Validation Error')
             elif BENCHMARK_NAME == 'MacroNAS':
-                plt.xlabel('MMACs (normalize)')
-                plt.ylabel('validation error')
+                plt.xlabel('MMACs (norm)')
+                plt.ylabel('Validation Error')
             else:
-                plt.xlabel('FLOP (normalize)')
-                plt.ylabel('valid-error')
+                plt.xlabel('FLOPs (norm)')
+                plt.ylabel('Validation Error')
 
             plt.legend()
             plt.grid()
@@ -1015,37 +1015,43 @@ if __name__ == '__main__':
     BENCHMARK_NAME = 'MacroNAS'
     SEARCH_SPACE = 'C10'
 
-    user_input = [[0, 0, '2X', 0, 0]]
+    user_input = [[0, 0, '2X', 1, 10]]
 
     PATH_DATA = 'D:/Files/benchmarks'
 
     if BENCHMARK_NAME == '101':
         BENCHMARK_API = api.NASBench_()
-        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-101/data.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-101/mi_ma_Params.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-101/PF(nor)_Params-ValidAcc.p', 'rb'))
+        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-101/data.p', 'rb'))
+        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-101/mi_ma_Params.p', 'rb'))
+        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-101/PF(nor)_Params-ValidAcc.p', 'rb'))
 
     elif BENCHMARK_NAME == '201_C10':
-        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
+        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/encode_data.p', 'rb'))
+        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/mi_ma_FLOPs.p', 'rb'))
+        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
 
     elif BENCHMARK_NAME == '201_C100':
-        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
+        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/encode_data.p', 'rb'))
+        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/mi_ma_FLOPs.p', 'rb'))
+        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
 
     elif BENCHMARK_NAME == '201_IN16_120':
-        BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
+        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/encode_data.p', 'rb'))
+        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/mi_ma_FLOPs.p', 'rb'))
+        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
 
-    # Sửa y chang cho C100
     elif BENCHMARK_NAME == 'MacroNAS':
-        BENCHMARK_DATA = pk.load(open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb'))
-        BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb'))
-        BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA +
-                                         f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_MMACs(norm)_valid(error).p', 'rb'))
+        f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
+        f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
+        f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
+
+        BENCHMARK_DATA = p.load(f_data)
+        BENCHMARK_MIN_MAX = p.load(f_mi_ma)
+        BENCHMARK_PF_TRUE = p.load(f_pf)
+
+        f_data.close()
+        f_mi_ma.close()
+        f_pf.close()
 
     print('--> Load benchmark - Done')
 
@@ -1095,9 +1101,9 @@ if __name__ == '__main__':
             os.mkdir(SUB_PATH + '/pf_eval')
             print(f'--> Create folder {SUB_PATH}/pf_eval - Done')
 
-            # Create new folder (visualize_pf_each_gen) in 'i_run' folder
-            os.mkdir(SUB_PATH + '/visualize_pf_each_gen')
-            print(f'--> Create folder {SUB_PATH}/visualize_pf_each_gen - Done\n')
+            # Create new folder (elitist_archive) in 'i_run' folder
+            os.mkdir(SUB_PATH + '/elitist_archive')
+            print(f'--> Create folder {SUB_PATH}/elitist_archive - Done\n')
 
             net = NSGANet(m_nEs=MAX_NO_EVALUATIONS,
                           pop_size=POP_SIZE,
