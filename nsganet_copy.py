@@ -46,6 +46,7 @@ def encode(X, benchmark):
     return encode_X
 
 
+# Using for 101
 def encode_(X):
     hashX = []
     for x in X:
@@ -59,7 +60,7 @@ def encode_(X):
     return np.array(hashX)
 
 
-# Using for MarcoNAS-C10/C100
+# Using for MarcoNAS
 def insert_to_list_x(x):
     added = ['|', '|', '|']
     indices = [4, 8, 12]
@@ -165,16 +166,15 @@ class NSGANet(GeneticAlgorithm):
         hashX = new_solution.get('hashX')
         F = new_solution.get('F')
 
-        rank = np.zeros(len(self.tmp_A_X))
+        l = len(self.tmp_A_X)
+        r = np.zeros(l)
         if hashX not in self.tmp_A_hashX:
             flag = True
-            for j in range(len(self.tmp_A_X)):
-
+            for i in range(l):
                 better_idv = find_better_idv(f0_0=F[0], f0_1=F[1],
-                                             f1_0=self.tmp_A_F[j][0], f1_1=self.tmp_A_F[j][1])
+                                             f1_0=self.tmp_A_F[i][0], f1_1=self.tmp_A_F[i][1])
                 if better_idv == 0:
-                    rank[j] += 1
-
+                    r[i] += 1
                 elif better_idv == 1:
                     flag = False
                     break
@@ -183,26 +183,28 @@ class NSGANet(GeneticAlgorithm):
                 self.tmp_A_X.append(np.array(X))
                 self.tmp_A_hashX.append(np.array(hashX))
                 self.tmp_A_F.append(np.array(F))
-                rank = np.append(rank, 0)
+                r = np.append(r, 0)
 
-        self.tmp_A_X = np.array(self.tmp_A_X)[rank == 0].tolist()
-        self.tmp_A_hashX = np.array(self.tmp_A_hashX)[rank == 0].tolist()
-        self.tmp_A_F = np.array(self.tmp_A_F)[rank == 0].tolist()
+        self.tmp_A_X = np.array(self.tmp_A_X)[r == 0].tolist()
+        self.tmp_A_hashX = np.array(self.tmp_A_hashX)[r == 0].tolist()
+        self.tmp_A_F = np.array(self.tmp_A_F)[r == 0].tolist()
 
     def update_A(self, new_solution):
         X = new_solution.get('X')
         hashX = new_solution.get('hashX')
         F = new_solution.get('F')
-        rank = np.zeros(len(self.A_X))
+
+        l = len(self.A_X)
+        r = np.zeros(l)
         if hashX not in self.A_hashX:
             flag = True
-            for j in range(len(self.A_X)):
+            for i in range(l):
                 better_idv = find_better_idv(f0_0=F[0], f0_1=F[1],
-                                             f1_0=self.A_F[j][0], f1_1=self.A_F[j][1])
+                                             f1_0=self.A_F[i][0], f1_1=self.A_F[i][1])
                 if better_idv == 0:
-                    rank[j] += 1
-                    if self.A_hashX[j] not in self.DS:
-                        self.DS.append(self.A_hashX[j])
+                    r[i] += 1
+                    if self.A_hashX[i] not in self.DS:
+                        self.DS.append(self.A_hashX[i])
 
                 elif better_idv == 1:
                     flag = False
@@ -214,11 +216,11 @@ class NSGANet(GeneticAlgorithm):
                 self.A_X.append(np.array(X))
                 self.A_hashX.append(np.array(hashX))
                 self.A_F.append(np.array(F))
-                rank = np.append(rank, 0)
+                r = np.append(r, 0)
 
-        self.A_X = np.array(self.A_X)[rank == 0].tolist()
-        self.A_hashX = np.array(self.A_hashX)[rank == 0].tolist()
-        self.A_F = np.array(self.A_F)[rank == 0].tolist()
+        self.A_X = np.array(self.A_X)[r == 0].tolist()
+        self.A_hashX = np.array(self.A_hashX)[r == 0].tolist()
+        self.A_F = np.array(self.A_F)[r == 0].tolist()
 
     def evaluate(self, X, using_surrogate_model=False, count_nE=True):
         F = np.full(2, fill_value=np.nan)
@@ -927,7 +929,7 @@ class NSGANet(GeneticAlgorithm):
             self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
             self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
 
-            IGD = round(calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE), 6)
+            IGD = calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE)
             if len(self.no_eval) == 0:
                 self.IGD.append(IGD)
                 self.no_eval.append(self.nEs)
@@ -976,8 +978,8 @@ class NSGANet(GeneticAlgorithm):
 
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser('NSGAII for NAS')
-    #
+    parser = argparse.ArgumentParser()
+
     # # hyper-parameters for problem
     # parser.add_argument('--benchmark_name', type=str, default='cifar10',
     #                     help='the benchmark used for optimizing')
@@ -999,25 +1001,26 @@ if __name__ == '__main__':
     # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
     #
     # parser.add_argument('--using_surrogate_model', type=int, default=0)
-    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
-    # args = parser.parse_args()
+
+    parser.add_argument('--benchmark', type=str, help='benchmark name')
+    parser.add_argument('--search_space', type=str, help='search space')
+    parser.add_argument('--path', type=str, help='path for loading data and saving results')
+    args = parser.parse_args()
     ''' ------- '''
     SAVE = True
     DEBUG = False
 
     ALGORITHM_NAME = 'NSGA-II'
 
-    NUMBER_OF_RUNS = 21
+    NUMBER_OF_RUNS = 1
     INIT_SEED = 0
 
-    BENCHMARK_NAME = '201'
-    SEARCH_SPACE = 'C100'
+    BENCHMARK_NAME = args.benchmark
+    SEARCH_SPACE = args.search_space
 
-    user_input = [[0, 0, '2X', 0, 0],
-                  [1, 1, '2X', 0, 0],
-                  [1, 2, '2X', 0, 0]]
+    user_input = [[0, 0, '2X', 1, 10]]
 
-    PATH_DATA = 'D:/Files/benchmarks'
+    PATH_DATA = args.path + '/BENCHMARKS'
 
     if BENCHMARK_NAME == '101':
         BENCHMARK_API = api.NASBench_()
@@ -1065,7 +1068,7 @@ if __name__ == '__main__':
                                 f'{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_{LOCAL_SEARCH_ON_N_POINTS}_'
                                 f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
                                 f'd%d_m%m_H%H_M%M_S%S')
-        ROOT_PATH = 'D:/Files/RESULTS/' + dir_name
+        ROOT_PATH = args.path + '/RESULTS/' + dir_name
 
         # Create root folder
         os.mkdir(ROOT_PATH)

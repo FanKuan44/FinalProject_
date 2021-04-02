@@ -14,4 +14,4 @@ def calc_IGD(pareto_front, pareto_s):
         for solution_ in pareto_s:
             d_ = min(calc_Euclidean_distance(solution, solution_), d_)
         d += d_
-    return d / len(pareto_front)
+    return round(d / len(pareto_front), 6)
