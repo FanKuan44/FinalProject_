@@ -33,7 +33,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
 
         for i in range(number_of_experiments):
             path_ = path + f'/{i}'
-            total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
+            total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_IGD.p', 'rb'))
             no_evaluations_gen_0 = total_no_evaluations[0]
             min_total_no_evaluations = min(min_total_no_evaluations, total_no_evaluations[-1])
 
@@ -42,7 +42,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
         for i in range(number_of_experiments):
             path_ = path + f'/{i}'
 
-            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
+            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_IGD.p', 'rb'))
 
             # Interpolation
             new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1, no_evaluations_gen_0//2)
@@ -116,7 +116,7 @@ def find_reference_point(paths):
     for path in paths:
         number_of_folders = len(os.listdir(path))
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/reference_point_.p'
+            path_ = path + f'/{folder_i}/reference_point.p'
 
             f0, f1 = pickle.load(open(path_, 'rb'))
             max_f0 = max(max_f0, f0)
@@ -145,7 +145,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
         number_of_folders = len(os.listdir(path))
 
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf1_eval'
+            path_ = path + f'/{folder_i}/pf_eval'
             pf_and_eval_folder = os.listdir(path_)
 
             # Sort files by name
@@ -160,7 +160,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
         upper = min_eval // eval_gen_0 * eval_gen_0
 
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf1_eval'
+            path_ = path + f'/{folder_i}/pf_eval'
 
             pf_and_eval_folder = os.listdir(path_)
 
@@ -274,7 +274,7 @@ if __name__ == '__main__':
     LOG_X = True
     LOG_Y = False
     benchmark = 'C100'
-    FOLDER = f'D:/Files/RESULTS/MacroNAS_{benchmark}'
+    FOLDER = f'D:/Files/RESULTS/201_{benchmark}'
     # FOLDER = 'D:/Files/RESULTS/processing'
     if SAVE:
         now = datetime.now()

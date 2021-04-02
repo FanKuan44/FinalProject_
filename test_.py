@@ -145,7 +145,7 @@ def visualize_per_result(path):
                     # else:
                     #     ax.plot(data2[0], data1, label=label_)
             handles, labels = ax.get_legend_handles_labels()
-            if folder_ == 'HP' or folder_ == 'HP_':
+            if folder_ == 'HP':
                 ylabel = 'Hypervolume'
             else:
                 ylabel = 'IGD'
@@ -181,7 +181,7 @@ def visualize_per_result(path):
 
 if __name__ == '__main__':
     benchmark = 'C100'
-    PATH = f'D:/Files/RESULTS/MacroNAS_{benchmark}'
+    PATH = f'D:/Files/RESULTS/201_{benchmark}'
     # PATH = 'D:/Files/test'
     # visualize_multi_results(PATH)
     visualize_per_result(PATH)

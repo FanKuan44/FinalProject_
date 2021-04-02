@@ -1,21 +1,21 @@
 import pickle as p
 from wrap_pymoo.util.compare import find_better_idv
 import numpy as np
-from wrap_pymoo.util.igd_calculating import calc_igd
+from wrap_pymoo.util.IGD_calculating import calc_IGD
 import os
 
 if __name__ == '__main__':
-    f_data = open('D:/Files/benchmarks/MacroNAS/C100/data.p', 'rb')
+    f_data = open('D:/Files/benchmarks/201/C100/data.p', 'rb')
     data = p.load(f_data)
     f_data.close()
 
-    f_mi_ma = open('D:/Files/benchmarks/MacroNAS/C100/mi_ma.p', 'rb')
+    f_mi_ma = open('D:/Files/benchmarks/201/C100/mi_ma.p', 'rb')
     mi_ma = p.load(f_mi_ma)
     f_mi_ma.close()
 
     print('load data - done')
 
-    path = 'D:/Files/RESULTS/processing'
+    path = 'D:/Files/RESULTS/201_C100'
     files = os.listdir(path)
     for result in files:
         folders = os.listdir(path + '/' + result)
@@ -35,10 +35,10 @@ if __name__ == '__main__':
                 f.close()
                 n_gens = int(gen[4:-2])
                 arch = [''.join(idv) for idv in ea]
-                metrics = [[data[x]['MMACs'], data[x]['test_acc']] for x in arch]
+                metrics = [[data[x]['FLOPs'], data[x]['test_acc']] for x in arch]
                 metrics = np.array(metrics)
-                metrics[:, 0] = np.round((metrics[:, 0] - mi_ma['MMACs']['min']) /
-                                         (mi_ma['MMACs']['max'] - mi_ma['MMACs']['min']), 6)
+                metrics[:, 0] = np.round((metrics[:, 0] - mi_ma['FLOPs']['min']) /
+                                         (mi_ma['FLOPs']['max'] - mi_ma['FLOPs']['min']), 6)
                 metrics[:, 1] = np.round(1 - metrics[:, 1], 4)
 
                 l = len(metrics)

@@ -228,8 +228,8 @@ class NSGANet(GeneticAlgorithm):
             if BENCHMARK_NAME == 'MacroNAS':
                 hashX = ''.join(X.tolist())
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
-                                (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
+                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
                 F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
 
             elif BENCHMARK_NAME == '101':
@@ -245,12 +245,12 @@ class NSGANet(GeneticAlgorithm):
                                 (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
                 F[1] = np.round(1 - BENCHMARK_DATA[hashX]['val_acc'], 6)
 
-            elif BENCHMARK_NAME == '201_C10' or BENCHMARK_NAME == '201_C100' or BENCHMARK_NAME == '201__IN16_120':
+            elif BENCHMARK_NAME == '201':
                 hashX = convert_to_hashX(X, BENCHMARK_NAME)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['FLOP'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
-                F[1] = np.round(1 - BENCHMARK_DATA[hashX]['valid-accuracy'] / 100, 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
+                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
+                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
 
             if count_nE:
                 self.nEs += 1
@@ -260,8 +260,8 @@ class NSGANet(GeneticAlgorithm):
                 encode_X = encode(X, BENCHMARK_NAME)
                 hashX = ''.join(X.tolist())
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
-                                (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
+                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
@@ -269,17 +269,17 @@ class NSGANet(GeneticAlgorithm):
                     F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
                     self.nEs += 1
 
-            elif BENCHMARK_NAME == '201_C10' or BENCHMARK_NAME == '201_C100' or BENCHMARK_NAME == '201__IN16_120':
+            elif BENCHMARK_NAME == '201':
                 hashX = convert_to_hashX(X, BENCHMARK_NAME)
                 encode_X = encode(X, BENCHMARK_NAME)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['FLOP'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
+                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = np.round(1 - BENCHMARK_DATA[hashX]['valid-accuracy'] / 100, 6)
+                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
                     self.nEs += 1
 
             else:
@@ -296,7 +296,7 @@ class NSGANet(GeneticAlgorithm):
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
+                    F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
                     self.nEs += 1
             if twice:
                 self.F_total.append(F[1])
@@ -337,7 +337,7 @@ class NSGANet(GeneticAlgorithm):
                         i += 1
 
         else:
-            if BENCHMARK_NAME == '201_C10' or BENCHMARK_NAME == '201_C100' or BENCHMARK_NAME == '201_IN16_120':
+            if BENCHMARK_NAME == '201':
                 l = 6
                 opt = ['0', '1', '2', '3', '4']
             else:
@@ -717,7 +717,7 @@ class NSGANet(GeneticAlgorithm):
                         better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
                                                      f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1])
 
-                    if better_idv == 1:  # --> neighboring solutions is better
+                    if better_idv == 0:  # --> neighboring solutions is better
                         S[i].set('X', o_X)
                         S[i].set('hashX', o_hashX)
                         S[i].set('F', o_F)
@@ -963,13 +963,11 @@ class NSGANet(GeneticAlgorithm):
 
             if BENCHMARK_NAME == '101':
                 plt.xlabel('Params (norm)')
-                plt.ylabel('Validation Error')
             elif BENCHMARK_NAME == 'MacroNAS':
                 plt.xlabel('MMACs (norm)')
-                plt.ylabel('Validation Error')
             else:
                 plt.xlabel('FLOPs (norm)')
-                plt.ylabel('Validation Error')
+            plt.ylabel('Validation Error')
 
             plt.legend()
             plt.grid()
@@ -1009,13 +1007,15 @@ if __name__ == '__main__':
 
     ALGORITHM_NAME = 'NSGA-II'
 
-    NUMBER_OF_RUNS = 1
+    NUMBER_OF_RUNS = 21
     INIT_SEED = 0
 
-    BENCHMARK_NAME = 'MacroNAS'
-    SEARCH_SPACE = 'C10'
+    BENCHMARK_NAME = '201'
+    SEARCH_SPACE = 'C100'
 
-    user_input = [[0, 0, '2X', 1, 10]]
+    user_input = [[0, 0, '2X', 0, 0],
+                  [1, 1, '2X', 0, 0],
+                  [1, 2, '2X', 0, 0]]
 
     PATH_DATA = 'D:/Files/benchmarks'
 
@@ -1025,22 +1025,7 @@ if __name__ == '__main__':
         BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-101/mi_ma_Params.p', 'rb'))
         BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-101/PF(nor)_Params-ValidAcc.p', 'rb'))
 
-    elif BENCHMARK_NAME == '201_C10':
-        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
-
-    elif BENCHMARK_NAME == '201_C100':
-        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
-
-    elif BENCHMARK_NAME == '201_IN16_120':
-        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/encode_data.p', 'rb'))
-        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/mi_ma_FLOPs.p', 'rb'))
-        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/PF(nor)_FLOPs-ValidAcc.p', 'rb'))
-
-    elif BENCHMARK_NAME == 'MacroNAS':
+    elif BENCHMARK_NAME == '201' or BENCHMARK_NAME == 'MacroNAS':
         f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
         f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
         f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
@@ -1055,7 +1040,7 @@ if __name__ == '__main__':
 
     print('--> Load benchmark - Done')
 
-    if BENCHMARK_NAME == '201_C10' or BENCHMARK_NAME == '201_C100' or BENCHMARK_NAME == '201_IN16_120':
+    if BENCHMARK_NAME == '201':
         POP_SIZE = 20
         MAX_NO_EVALUATIONS = 3000
     else:
