@@ -1,50 +1,52 @@
-import argparse
-import os
-import matplotlib.pyplot as plt
-import numpy as np
-import pickle as pk
-import timeit
-import torch
-
-from acc_predictor.factory import get_acc_predictor
-from datetime import datetime
-
-from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
-from pymoo.operators.default_operators import set_if_none
-from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
-from pymoo.operators.sampling.random_sampling import RandomSampling
-from pymoo.operators.selection.tournament_selection import TournamentSelection
-from pymoo.util.display import disp_multi_objective
-from pymoo.util.non_dominated_sorting import NonDominatedSorting
-# =========================================================================================================
-# Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
-# =========================================================================================================
-from nasbench import wrap_api as api
-
-from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
-
-from wrap_pymoo.model.individual import MyIndividual as Individual
-from wrap_pymoo.model.population import MyPopulation as Population
-
-from wrap_pymoo.util.compare import find_better_idv
-from wrap_pymoo.util.IGD_calculating import cal_dpfs
-from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
-from wrap_pymoo.util.survial_selection import RankAndCrowdingSurvival
-from wrap_pymoo.util.tournament_selection import binary_tournament
-
-from wrap_pymoo.factory_nasbench import combine_matrix1D_and_opsINT, split_to_matrix1D_and_opsINT, create_model
-from wrap_pymoo.factory_nasbench import encoding_ops, decoding_ops, encoding_matrix, decoding_matrix
+# import argparse
+# import os
+# import matplotlib.pyplot as plt
+# import numpy as np
+# import pickle as pk
+# import timeit
+# import torch
+#
+# from acc_predictor.factory import get_acc_predictor
+# from datetime import datetime
+#
+# from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
+# from pymoo.operators.default_operators import set_if_none
+# from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
+# from pymoo.operators.sampling.random_sampling import RandomSampling
+# from pymoo.operators.selection.tournament_selection import TournamentSelection
+# from pymoo.util.display import disp_multi_objective
+# from pymoo.util.non_dominated_sorting import NonDominatedSorting
+# # =========================================================================================================
+# # Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
+# # =========================================================================================================
+# from nasbench import wrap_api as api
+#
+# from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
+#
+# from wrap_pymoo.model.individual import MyIndividual as Individual
+# from wrap_pymoo.model.population import MyPopulation as Population
+#
+# from wrap_pymoo.util.compare import find_better_idv
+# from wrap_pymoo.util.IGD_calculating import cal_IGD
+# from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
+# from wrap_pymoo.util.survial_selection import RankAndCrowdingSurvival
+# from wrap_pymoo.util.tournament_selection import binary_tournament
+#
+# from wrap_pymoo.factory_nasbench import combine_matrix1D_and_opsINT, split_to_matrix1D_and_opsINT, create_model
+# from wrap_pymoo.factory_nasbench import encoding_ops, decoding_ops, encoding_matrix, decoding_matrix
+from lib import *
 
 
 def encode(X, benchmark):
     if isinstance(X, list):
         X = np.array(X)
-    if benchmark == 'MacroNAS-CIFAR-10' or benchmark == 'MacroNAS-CIFAR-100':
+    if benchmark == 'MacroNAS':
         X = np.where(X == 'I', 0, X)
     encode_X = np.array(X, dtype=np.int)
     return encode_X
 
 
+# Using for 101
 def encode_(X):
     hashX = []
     for x in X:
@@ -58,7 +60,7 @@ def encode_(X):
     return np.array(hashX)
 
 
-# Using for MarcoNAS-C10/C100
+# Using for MarcoNAS
 def insert_to_list_x(x):
     added = ['|', '|', '|']
     indices = [4, 8, 12]
@@ -77,7 +79,7 @@ def remove_values_from_list_X(X, val):
 def convert_to_hashX(X, benchmark):
     if not isinstance(X, list):
         X = X.tolist()
-    if benchmark == 'MacroNAS-CIFAR-10' or benchmark == 'MacroNAS-CIFAR-100':
+    if benchmark == 'MacroNAS':
         X = insert_to_list_x(X)
         X = remove_values_from_list_X(X, 'I')
     hashX = ''.join(X)
@@ -139,7 +141,7 @@ class NSGANet(GeneticAlgorithm):
         self.A_X, self.A_hashX, self.A_F = [], [], []
         self.tmp_A_X, self.tmp_A_hashX, self.tmp_A_F = [], [], []
 
-        self.dpfs = []
+        self.IGD = []
         self.no_eval = []
 
         self.m_nEs = m_nEs
@@ -164,16 +166,16 @@ class NSGANet(GeneticAlgorithm):
         hashX = new_solution.get('hashX')
         F = new_solution.get('F')
 
-        rank = np.zeros(len(self.tmp_A_X))
+        l = len(self.tmp_A_X)
+        r = np.zeros(l)
         if hashX not in self.tmp_A_hashX:
             flag = True
-            for j in range(len(self.tmp_A_X)):
-
-                better_idv = find_better_idv(F, self.tmp_A_F[j])
-                if better_idv == 1:
-                    rank[j] += 1
-
-                elif better_idv == 2:
+            for i in range(l):
+                better_idv = find_better_idv(f0_0=F[0], f0_1=F[1],
+                                             f1_0=self.tmp_A_F[i][0], f1_1=self.tmp_A_F[i][1])
+                if better_idv == 0:
+                    r[i] += 1
+                elif better_idv == 1:
                     flag = False
                     break
 
@@ -181,29 +183,30 @@ class NSGANet(GeneticAlgorithm):
                 self.tmp_A_X.append(np.array(X))
                 self.tmp_A_hashX.append(np.array(hashX))
                 self.tmp_A_F.append(np.array(F))
-                rank = np.append(rank, 0)
+                r = np.append(r, 0)
 
-        self.tmp_A_X = np.array(self.tmp_A_X)[rank == 0].tolist()
-        self.tmp_A_hashX = np.array(self.tmp_A_hashX)[rank == 0].tolist()
-        self.tmp_A_F = np.array(self.tmp_A_F)[rank == 0].tolist()
+        self.tmp_A_X = np.array(self.tmp_A_X)[r == 0].tolist()
+        self.tmp_A_hashX = np.array(self.tmp_A_hashX)[r == 0].tolist()
+        self.tmp_A_F = np.array(self.tmp_A_F)[r == 0].tolist()
 
     def update_A(self, new_solution):
         X = new_solution.get('X')
         hashX = new_solution.get('hashX')
         F = new_solution.get('F')
 
-        rank = np.zeros(len(self.A_X))
+        l = len(self.A_X)
+        r = np.zeros(l)
         if hashX not in self.A_hashX:
             flag = True
-            for j in range(len(self.A_X)):
+            for i in range(l):
+                better_idv = find_better_idv(f0_0=F[0], f0_1=F[1],
+                                             f1_0=self.A_F[i][0], f1_1=self.A_F[i][1])
+                if better_idv == 0:
+                    r[i] += 1
+                    if self.A_hashX[i] not in self.DS:
+                        self.DS.append(self.A_hashX[i])
 
-                better_idv = find_better_idv(F, self.A_F[j])
-                if better_idv == 1:
-                    rank[j] += 1
-                    if self.A_hashX[j] not in self.DS:
-                        self.DS.append(self.A_hashX[j])
-
-                elif better_idv == 2:
+                elif better_idv == 1:
                     flag = False
                     if hashX not in self.DS:
                         self.DS.append(hashX)
@@ -213,25 +216,25 @@ class NSGANet(GeneticAlgorithm):
                 self.A_X.append(np.array(X))
                 self.A_hashX.append(np.array(hashX))
                 self.A_F.append(np.array(F))
-                rank = np.append(rank, 0)
+                r = np.append(r, 0)
 
-        self.A_X = np.array(self.A_X)[rank == 0].tolist()
-        self.A_hashX = np.array(self.A_hashX)[rank == 0].tolist()
-        self.A_F = np.array(self.A_F)[rank == 0].tolist()
+        self.A_X = np.array(self.A_X)[r == 0].tolist()
+        self.A_hashX = np.array(self.A_hashX)[r == 0].tolist()
+        self.A_F = np.array(self.A_F)[r == 0].tolist()
 
     def evaluate(self, X, using_surrogate_model=False, count_nE=True):
         F = np.full(2, fill_value=np.nan)
 
         twice = False  # --> using on 'surrogate model method'
         if not using_surrogate_model:
-            if BENCHMARK_NAME == 'MacroNAS-CIFAR-10' or BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
+            if BENCHMARK_NAME == 'MacroNAS':
                 hashX = ''.join(X.tolist())
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
-                F[1] = np.round(1 - BENCHMARK_DATA[hashX]['val_acc'] / 100, 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
+                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
+                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
 
-            elif BENCHMARK_NAME == 'NAS-Bench-101':
+            elif BENCHMARK_NAME == '101':
                 matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
 
                 matrix_2D = encoding_matrix(matrix_1D)
@@ -240,47 +243,45 @@ class NSGANet(GeneticAlgorithm):
                 modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                 hashX = BENCHMARK_API.get_module_hash(modelspec)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
-                F[1] = np.round(1 - BENCHMARK_DATA[hashX]['val_acc'], 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
+                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
+                F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
 
-            elif BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-10' or BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-100' \
-                    or BENCHMARK_NAME == 'NAS-Bench-201-ImageNet16-120':
+            elif BENCHMARK_NAME == '201':
                 hashX = convert_to_hashX(X, BENCHMARK_NAME)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['FLOP'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
-                F[1] = np.round(1 - BENCHMARK_DATA[hashX]['test-accuracy'] / 100, 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
+                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
+                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
 
             if count_nE:
                 self.nEs += 1
             self.F_total.append(F[1])
         else:
-            if BENCHMARK_NAME == 'MacroNAS-CIFAR-10' or BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
+            if BENCHMARK_NAME == 'MacroNAS':
                 encode_X = encode(X, BENCHMARK_NAME)
                 hashX = ''.join(X.tolist())
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
+                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = np.round(1 - BENCHMARK_DATA[hashX]['val_acc'] / 100, 6)
+                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
                     self.nEs += 1
 
-            elif BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-10' or BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-100' \
-                    or BENCHMARK_NAME == 'NAS-Bench-201-ImageNet16-120':
+            elif BENCHMARK_NAME == '201':
                 hashX = convert_to_hashX(X, BENCHMARK_NAME)
                 encode_X = encode(X, BENCHMARK_NAME)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['FLOP'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
+                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = np.round(1 - BENCHMARK_DATA[hashX]['test-accuracy'] / 100, 6)
+                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
                     self.nEs += 1
 
             else:
@@ -291,13 +292,13 @@ class NSGANet(GeneticAlgorithm):
                 modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                 hashX = BENCHMARK_API.get_module_hash(modelspec)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
+                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([X]))[0][0]
 
                 if F[1] < self.alpha:
                     twice = True
-                    F[1] = 1 - BENCHMARK_DATA[hashX]['val_acc']
+                    F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
                     self.nEs += 1
             if twice:
                 self.F_total.append(F[1])
@@ -313,7 +314,7 @@ class NSGANet(GeneticAlgorithm):
         P_hashX = []
         i = 0
 
-        if BENCHMARK_NAME == 'NAS-Bench-101':
+        if BENCHMARK_NAME == '101':
             while i < n_samples:
                 matrix_2D, ops_STRING = create_model()
                 MS = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
@@ -338,8 +339,7 @@ class NSGANet(GeneticAlgorithm):
                         i += 1
 
         else:
-            if BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-10' or BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-100'\
-                    or BENCHMARK_NAME == 'NAS-Bench-201-ImageNet16-120':
+            if BENCHMARK_NAME == '201':
                 l = 6
                 opt = ['0', '1', '2', '3', '4']
             else:
@@ -367,7 +367,7 @@ class NSGANet(GeneticAlgorithm):
         O = Population(len(P))
         O_hashX = []
 
-        nCOs = 0  # --> Avoid to stuck
+        nCOs = 0
 
         i = 0
         full = False
@@ -375,7 +375,7 @@ class NSGANet(GeneticAlgorithm):
             idx = np.random.choice(len(P), size=(len(P) // 2, 2), replace=False)
             P_ = P[idx]
 
-            if BENCHMARK_NAME == 'NAS-Bench-101':
+            if BENCHMARK_NAME == '101':
                 for j in range(len(P_)):
                     if np.random.random() < pC:
                         new_O1_X, new_O2_X = crossover(P_[j][0].get('X'), P_[j][1].get('X'), self.typeC)
@@ -535,7 +535,7 @@ class NSGANet(GeneticAlgorithm):
         full = False
         pM = 1/len(old_O_X[0])
         while not full:
-            if BENCHMARK_NAME == 'NAS-Bench-101':
+            if BENCHMARK_NAME == '101':
                 for x in old_O_X:
                     matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x)
 
@@ -586,7 +586,7 @@ class NSGANet(GeneticAlgorithm):
                                 break
 
             else:
-                if BENCHMARK_NAME == 'MacroNAS-CIFAR-10' or BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
+                if BENCHMARK_NAME == 'MacroNAS':
                     opt = ['I', '1', '2']
                 else:
                     opt = ['0', '1', '2', '3', '4']
@@ -633,7 +633,7 @@ class NSGANet(GeneticAlgorithm):
     def _initialize_custom(self):
         pop = self._sampling(self.pop_size)
         if self.using_surrogate_model:
-            if BENCHMARK_NAME == 'NAS-Bench-101':
+            if BENCHMARK_NAME == '101':
                 self.surrogate_model = self._create_surrogate_model(inputs=pop.get('X'),
                                                                     targets=pop.get('F')[:, 1])
             else:
@@ -656,7 +656,7 @@ class NSGANet(GeneticAlgorithm):
             first, last = len(S) - 2, len(S) - 1
 
         m_searches = len_soln
-        if BENCHMARK_NAME == 'MacroNAS-CIFAR-10' or BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
+        if BENCHMARK_NAME == 'MacroNAS':
             ops = ['I', '1', '2']
         else:
             ops = ['0', '1', '2', '3', '4']
@@ -673,7 +673,7 @@ class NSGANet(GeneticAlgorithm):
                 tmp_n_searches += 1
                 o = S[i].copy()  # --> neighboring solution
 
-                if BENCHMARK_NAME == 'NAS-Bench-101':
+                if BENCHMARK_NAME == '101':
                     ''' Local search on edges '''
                     matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(o.get('X'))
 
@@ -708,13 +708,18 @@ class NSGANet(GeneticAlgorithm):
                     o_F, twice = self.evaluate(o_X, using_surrogate_model=self.using_surrogate_model)
 
                     if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
-                        better_idv = find_better_idv(o_F, S[i].get('F'), 'first')
+                        better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
+                                                     f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1],
+                                                     pos='first')
                     elif i == last and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
-                        better_idv = find_better_idv(o_F, S[i].get('F'), 'last')
+                        better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
+                                                     f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1],
+                                                     pos='last')
                     else:
-                        better_idv = find_better_idv(o_F, S[i].get('F'))
+                        better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
+                                                     f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1])
 
-                    if better_idv == 1:  # --> neighboring solutions is better
+                    if better_idv == 0:  # --> neighboring solutions is better
                         S[i].set('X', o_X)
                         S[i].set('hashX', o_hashX)
                         S[i].set('F', o_F)
@@ -845,7 +850,7 @@ class NSGANet(GeneticAlgorithm):
         while self.nEs < self.m_nEs:
             self.n_gen += 1
 
-            if self.dpfs[-1] != 0.0:
+            if self.IGD[-1] != 0.0:
                 self.pop = self._next(self.pop)
             else:
                 self.nEs += self.pop_size
@@ -882,7 +887,7 @@ class NSGANet(GeneticAlgorithm):
                 Y = []
                 checked = []
                 for i in range(len(data)):
-                    if BENCHMARK_NAME == 'NAS-Bench-101':
+                    if BENCHMARK_NAME == '101':
                         matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(data[i].get('X'))
 
                         matrix_2D = encoding_matrix(matrix_1D)
@@ -905,7 +910,7 @@ class NSGANet(GeneticAlgorithm):
                 Y = np.array(Y)
                 if self.update_model:
                     self.n_updates += 1
-                    if BENCHMARK_NAME == 'NAS-Bench-101':
+                    if BENCHMARK_NAME == '101':
                         self.surrogate_model.fit(x=X, y=Y)
                     else:
                         self.surrogate_model.fit(x=encode(X, BENCHMARK_NAME), y=Y, verbose=False)
@@ -917,20 +922,22 @@ class NSGANet(GeneticAlgorithm):
             pf = np.array(self.A_F)
             pf = np.unique(pf, axis=0)
             pf = pf[np.argsort(pf[:, 0])]
-            pk.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+
+            p.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+            p.dump(self.A_X, open(f'{self.path}/elitist_archive/gen_{self.n_gen}.p', 'wb'))
+
             self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
             self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
 
-            dpfs = round(cal_dpfs(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE), 6)
-            print(self.nEs, dpfs)
+            IGD = calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE)
             if len(self.no_eval) == 0:
-                self.dpfs.append(dpfs)
+                self.IGD.append(IGD)
                 self.no_eval.append(self.nEs)
             else:
                 if self.nEs == self.no_eval[-1]:
-                    self.dpfs[-1] = dpfs
+                    self.IGD[-1] = IGD
                 else:
-                    self.dpfs.append(dpfs)
+                    self.IGD.append(IGD)
                     self.no_eval.append(self.nEs)
 
     def _finalize(self):
@@ -938,17 +945,16 @@ class NSGANet(GeneticAlgorithm):
         self.A_hashX = np.array(self.A_hashX)
         self.A_F = np.array(self.A_F)
 
-        pk.dump([self.A_X, self.A_hashX, self.A_F],
-                open(self.path + '/pareto_front.p', 'wb'))
+        p.dump([self.A_X, self.A_hashX, self.A_F], open(self.path + '/pareto_front.p', 'wb'))
         if SAVE:
-            pk.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
-            # visualize DPFS
-            pk.dump([self.no_eval, self.dpfs], open(f'{self.path}/no_eval_and_dpfs.p', 'wb'))
-            plt.plot(self.no_eval, self.dpfs)
+            p.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
+            # visualize IGD
+            p.dump([self.no_eval, self.IGD], open(f'{self.path}/no_eval_and_IGD.p', 'wb'))
+            plt.plot(self.no_eval, self.IGD)
             plt.xlabel('No.Evaluations')
-            plt.ylabel('DPFS')
+            plt.ylabel('IGD')
             plt.grid()
-            plt.savefig(f'{self.path}/dpfs_and_no_evaluations')
+            plt.savefig(f'{self.path}/IGD_and_no_evaluations')
             plt.clf()
 
             # visualize elitist archive
@@ -957,15 +963,13 @@ class NSGANet(GeneticAlgorithm):
             plt.scatter(self.A_F[:, 0], self.A_F[:, 1], c='red', s=15,
                         label='elitist archive')
 
-            if BENCHMARK_NAME == 'NAS-Bench-101':
-                plt.xlabel('params (normalize)')
-                plt.ylabel('valid-error')
-            elif BENCHMARK_NAME == 'MacroNAS-CIFAR-10' or BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
-                plt.xlabel('MMACs (normalize)')
-                plt.ylabel('valid-error')
+            if BENCHMARK_NAME == '101':
+                plt.xlabel('Params (norm)')
+            elif BENCHMARK_NAME == 'MacroNAS':
+                plt.xlabel('MMACs (norm)')
             else:
-                plt.xlabel('FLOP (normalize)')
-                plt.ylabel('test-error')
+                plt.xlabel('FLOPs (norm)')
+            plt.ylabel('Validation Error')
 
             plt.legend()
             plt.grid()
@@ -974,8 +978,8 @@ class NSGANet(GeneticAlgorithm):
 
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser('NSGAII for NAS')
-    #
+    parser = argparse.ArgumentParser()
+
     # # hyper-parameters for problem
     # parser.add_argument('--benchmark_name', type=str, default='cifar10',
     #                     help='the benchmark used for optimizing')
@@ -997,125 +1001,111 @@ if __name__ == '__main__':
     # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
     #
     # parser.add_argument('--using_surrogate_model', type=int, default=0)
-    # parser.add_argument('--update_model_after_n_gens', type=int, default=10)
-    # args = parser.parse_args()
+
+    parser.add_argument('--benchmark', type=str, help='benchmark name')
+    parser.add_argument('--search_space', type=str, default='C10', help='search space')
+    parser.add_argument('--path', type=str, help='path for loading data and saving results')
+    args = parser.parse_args()
     ''' ------- '''
     SAVE = True
     DEBUG = False
 
     ALGORITHM_NAME = 'NSGA-II'
 
-    NUMBER_OF_RUNS = 21
+    NUMBER_OF_RUNS = 1
     INIT_SEED = 0
 
-    problems = ['NAS-Bench-101']
+    BENCHMARK_NAME = args.benchmark
+    SEARCH_SPACE = args.search_space
 
-    for BENCHMARK_NAME in problems:
-        user_input = [[1, 1, '2X', 1, 10]]
+    user_input = [[0, 0, '2X', 0, 0]]
 
-        PATH_DATA = 'D:/Files'
+    PATH_DATA = args.path + '/BENCHMARKS'
 
-        if BENCHMARK_NAME == 'NAS-Bench-101':
-            BENCHMARK_API = api.NASBench_()
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-101/data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-101/mi_ma_Params.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-101/PF(nor)_Params-ValidAcc.p', 'rb'))
+    if BENCHMARK_NAME == '101':
+        BENCHMARK_API = api.NASBench_()
+        SEARCH_SPACE = ''
+    f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
+    f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
+    f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
 
-        elif BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-10':
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/encode_data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/mi_ma_FLOPs.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-10/PF(nor)_FLOPs-TestAcc.p', 'rb'))
+    BENCHMARK_DATA = p.load(f_data)
+    BENCHMARK_MIN_MAX = p.load(f_mi_ma)
+    BENCHMARK_PF_TRUE = p.load(f_pf)
 
-        elif BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-100':
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/encode_data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/mi_ma_FLOPs.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/CIFAR-100/PF(nor)_FLOPs-TestAcc.p', 'rb'))
+    f_data.close()
+    f_mi_ma.close()
+    f_pf.close()
 
-        elif BENCHMARK_NAME == 'NAS-Bench-201-ImageNet16-120':
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/encode_data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/mi_ma_FLOPs.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/NAS-Bench-201/ImageNet16-120/PF(nor)_FLOPs-TestAcc.p', 'rb'))
+    print('--> Load benchmark - Done')
 
-        elif BENCHMARK_NAME == 'MacroNAS-CIFAR-10':
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-10/data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-10/mi_ma_MMACs.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-10/PF(nor)_MMACs-ValidAcc.p', 'rb'))
+    if BENCHMARK_NAME == '201':
+        POP_SIZE = 20
+        MAX_NO_EVALUATIONS = 3000
+    else:
+        POP_SIZE = 100
+        MAX_NO_EVALUATIONS = 30000
 
-        elif BENCHMARK_NAME == 'MacroNAS-CIFAR-100':
-            BENCHMARK_DATA = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-100/data.p', 'rb'))
-            BENCHMARK_MIN_MAX = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-100/mi_ma_MMACs.p', 'rb'))
-            BENCHMARK_PF_TRUE = pk.load(open(PATH_DATA + '/MacroNAS/CIFAR-100/PF(nor)_MMACs-ValidAcc.p', 'rb'))
+    for _input in user_input:
+        CROSSOVER_TYPE = _input[2]
 
-        print('--> Load benchmark - Done')
+        USING_SURROGATE_MODEL = bool(_input[-2])
+        UPDATE_MODEL_AFTER_N_GENS = _input[-1]
+        if not USING_SURROGATE_MODEL:
+            UPDATE_MODEL_AFTER_N_GENS = 0
 
-        if BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-10' or BENCHMARK_NAME == 'NAS-Bench-201-CIFAR-100' \
-                or BENCHMARK_NAME == 'NAS-Bench-201-ImageNet16-120':
-            POP_SIZE = 20
-            MAX_NO_EVALUATIONS = 3000
-        else:
-            POP_SIZE = 100
-            MAX_NO_EVALUATIONS = 30000
+        LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[0])
+        LOCAL_SEARCH_ON_N_POINTS = _input[1]
+        if not LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
+            LOCAL_SEARCH_ON_N_POINTS = 0
 
-        for _input in user_input:
-            CROSSOVER_TYPE = _input[2]
+        now = datetime.now()
+        dir_name = now.strftime(f'{BENCHMARK_NAME}_{SEARCH_SPACE}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
+                                f'{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_{LOCAL_SEARCH_ON_N_POINTS}_'
+                                f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
+                                f'd%d_m%m_H%H_M%M_S%S')
+        ROOT_PATH = args.path + '/RESULTS/' + dir_name
 
-            USING_SURROGATE_MODEL = bool(_input[-2])
-            UPDATE_MODEL_AFTER_N_GENS = _input[-1]
-            if not USING_SURROGATE_MODEL:
-                UPDATE_MODEL_AFTER_N_GENS = 0
+        # Create root folder
+        os.mkdir(ROOT_PATH)
+        print(f'--> Create folder {ROOT_PATH} - Done\n')
 
-            LOCAL_SEARCH_ON_KNEE_SOLUTIONS = bool(_input[0])
-            LOCAL_SEARCH_ON_N_POINTS = _input[1]
-            if not LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
-                LOCAL_SEARCH_ON_N_POINTS = 0
+        for i_run in range(NUMBER_OF_RUNS):
+            SEED = INIT_SEED + i_run * 100
+            np.random.seed(SEED)
+            torch.random.manual_seed(SEED)
 
-            now = datetime.now()
-            dir_name = now.strftime(f'{BENCHMARK_NAME}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
-                                    f'{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_{LOCAL_SEARCH_ON_N_POINTS}_'
-                                    f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
-                                    f'd%d_m%m_H%H_M%M_S%S')
-            ROOT_PATH = PATH_DATA + '/results/' + dir_name
+            SUB_PATH = ROOT_PATH + f'/{i_run}'
 
-            # Create root folder
-            os.mkdir(ROOT_PATH)
-            print(f'--> Create folder {ROOT_PATH} - Done\n')
+            # Create new folder (i_run) in root folder
+            os.mkdir(SUB_PATH)
+            print(f'--> Create folder {SUB_PATH} - Done')
 
-            for i_run in range(16, NUMBER_OF_RUNS):
-                SEED = INIT_SEED + i_run * 100
-                np.random.seed(SEED)
-                torch.random.manual_seed(SEED)
+            # Create new folder (pf_eval) in 'i_run' folder
+            os.mkdir(SUB_PATH + '/pf_eval')
+            print(f'--> Create folder {SUB_PATH}/pf_eval - Done')
 
-                SUB_PATH = ROOT_PATH + f'/{i_run}'
+            # Create new folder (elitist_archive) in 'i_run' folder
+            os.mkdir(SUB_PATH + '/elitist_archive')
+            print(f'--> Create folder {SUB_PATH}/elitist_archive - Done\n')
 
-                # Create new folder (i_run) in root folder
-                os.mkdir(SUB_PATH)
-                print(f'--> Create folder {SUB_PATH} - Done')
+            net = NSGANet(m_nEs=MAX_NO_EVALUATIONS,
+                          pop_size=POP_SIZE,
+                          selection=TournamentSelection(func_comp=binary_tournament),
+                          survival=RankAndCrowdingSurvival(),
+                          typeC=CROSSOVER_TYPE,
+                          local_search_on_n_vars=LOCAL_SEARCH_ON_N_POINTS,
+                          using_surrogate_model=USING_SURROGATE_MODEL,
+                          update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+                          path=SUB_PATH)
 
-                # Create new folder (pf_eval) in 'i_run' folder
-                os.mkdir(SUB_PATH + '/pf_eval')
-                print(f'--> Create folder {SUB_PATH}/pf_eval - Done')
+            start = timeit.default_timer()
+            print(f'--> Experiment {i_run + 1} is running.')
+            net.solve_custom()
+            end = timeit.default_timer()
 
-                # Create new folder (visualize_pf_each_gen) in 'i_run' folder
-                os.mkdir(SUB_PATH + '/visualize_pf_each_gen')
-                print(f'--> Create folder {SUB_PATH}/visualize_pf_each_gen - Done\n')
+            print(f'--> The number of runs done: {i_run + 1}/{NUMBER_OF_RUNS}')
+            print(f'--> Took {end - start} seconds.\n')
 
-                net = NSGANet(
-                    m_nEs=MAX_NO_EVALUATIONS,
-                    pop_size=POP_SIZE,
-                    selection=TournamentSelection(func_comp=binary_tournament),
-                    survival=RankAndCrowdingSurvival(),
-                    typeC=CROSSOVER_TYPE,
-                    local_search_on_n_vars=LOCAL_SEARCH_ON_N_POINTS,
-                    using_surrogate_model=USING_SURROGATE_MODEL,
-                    update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-                    path=SUB_PATH)
-
-                start = timeit.default_timer()
-                print(f'--> Experiment {i_run + 1} is running.')
-                net.solve_custom()
-                end = timeit.default_timer()
-
-                print(f'--> The number of runs done: {i_run + 1}/{NUMBER_OF_RUNS}')
-                print(f'--> Took {end - start} seconds.\n')
-
-            print(f'All {NUMBER_OF_RUNS} runs - Done\nResults are saved on folder {ROOT_PATH}.\n')
+        print(f'All {NUMBER_OF_RUNS} runs - Done\n'
+              f'Results are saved on folder {ROOT_PATH}.\n')
