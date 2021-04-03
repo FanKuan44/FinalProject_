@@ -33,7 +33,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
 
         for i in range(number_of_experiments):
             path_ = path + f'/{i}'
-            total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_IGD.p', 'rb'))
+            total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
             no_evaluations_gen_0 = total_no_evaluations[0]
             min_total_no_evaluations = min(min_total_no_evaluations, total_no_evaluations[-1])
 
@@ -42,7 +42,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
         for i in range(number_of_experiments):
             path_ = path + f'/{i}'
 
-            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_IGD.p', 'rb'))
+            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
 
             # Interpolation
             new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1, no_evaluations_gen_0//2)
@@ -58,7 +58,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
         dpfs_each_exp = np.array(dpfs_each_exp)
         no_evaluations_each_exp = np.array(no_evaluations_each_exp)
 
-        pickle.dump([dpfs_each_exp, no_evaluations_each_exp], open(f'{FOLDER}/DPFS/{path.split("/")[-1]}_dpfs.p', 'wb'))
+        pickle.dump([dpfs_each_exp, no_evaluations_each_exp], open(f'{FOLDER}/IGD/{path.split("/")[-1]}_igd.p', 'wb'))
 
         dpf_avg = np.sum(dpfs_each_exp, axis=0) / len(dpfs_each_exp)
         no_eval_avg = np.sum(no_evaluations_each_exp, axis=0) / len(no_evaluations_each_exp)
@@ -72,7 +72,7 @@ def get_avg_dpfs_and_no_evaluations(paths):
 def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
     dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
-    axis_lbs = ['No.Evaluations', 'DPFS']
+    axis_lbs = ['No.Evaluations', 'IGD']
 
     for i in range(len(paths)):
         print(paths[i].split('_'))
@@ -100,7 +100,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
     pop_size = paths[-1].split('_')[2]
     plt.title(title + f' - pop size: {pop_size}')
     if save_fig:
-        plt.savefig('fig/' + dir_name + '/' + 'dpfs_eval')
+        plt.savefig('fig/' + dir_name + '/' + 'IGD_eval')
         print('Figures are saved on ' + 'fig/' + dir_name)
         plt.clf()
     if show_fig:
@@ -116,7 +116,7 @@ def find_reference_point(paths):
     for path in paths:
         number_of_folders = len(os.listdir(path))
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/reference_point.p'
+            path_ = path + f'/{folder_i}/reference_point_.p'
 
             f0, f1 = pickle.load(open(path_, 'rb'))
             max_f0 = max(max_f0, f0)
@@ -145,7 +145,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
         number_of_folders = len(os.listdir(path))
 
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf_eval'
+            path_ = path + f'/{folder_i}/pf1_eval'
             pf_and_eval_folder = os.listdir(path_)
 
             # Sort files by name
@@ -160,7 +160,7 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
         upper = min_eval // eval_gen_0 * eval_gen_0
 
         for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf_eval'
+            path_ = path + f'/{folder_i}/pf1_eval'
 
             pf_and_eval_folder = os.listdir(path_)
 
@@ -258,7 +258,7 @@ def main():
     paths = []
     for path in os.listdir(FOLDER):
         paths.append(FOLDER + '/' + path)
-    os.mkdir(FOLDER + '/' + 'DPFS')
+    os.mkdir(FOLDER + '/' + 'IGD')
     os.mkdir(FOLDER + '/' + 'HP')
 
     visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     SAVE = False
     LOG_X = True
     LOG_Y = False
-    benchmark = 'C100'
+    benchmark = 'C10'
     FOLDER = f'D:/Files/RESULTS/201_{benchmark}'
     # FOLDER = 'D:/Files/RESULTS/processing'
     if SAVE:

@@ -6,8 +6,9 @@ from matplotlib.pyplot import figure
 
 
 def visualize_multi_results(path):
+    plt.rc('font', family='Times New Roman')
     handles, labels = None, None
-    fig, ax = plt.subplots(nrows=2, ncols=2)#, figsize=(100, 100))
+    fig, ax = plt.subplots(nrows=2, ncols=2)
 
     i = 0
     j = 0
@@ -15,16 +16,20 @@ def visualize_multi_results(path):
         # print(folder)
         sub_folder = path + '/' + folder
         for folder_ in os.listdir(sub_folder):
-            if folder_ == 'HP' or folder_ == 'DPFS':
+            if folder_ == 'HP' or folder_ == 'IGD':
+                if folder_ == 'HP':
+                    j = 1
+                else:
+                    j = 0
                 print(folder_)
 
                 sub_sub_folder = sub_folder + '/' + folder_
                 title = None
 
                 for file in os.listdir(sub_sub_folder):
-                    label = file.split('_')[4:8]
-                    print(label)
-                    title = file.split('_')[0]
+                    attrs = file.split('_')
+                    label = attrs[5:9]
+                    title = attrs[0] + '-' + attrs[1]
                     if label[0] == 'False' and label[-2] == 'False':
                         label_ = 'NSGA-II'
                     elif label[0] == 'False' and label[-2] == 'True':
@@ -39,7 +44,6 @@ def visualize_multi_results(path):
                     data1, data2 = p.load(open(path_file, 'rb'))
                     data1 = np.sum(data1, axis=0) / len(data1)
                     if label_ == 'NSGA-II w/ LS (k = 2)' or label_ == 'NSGA-II w/ SM + LS (k = 2)':
-                    # if label_ == 'NSGA-II w/ SM' or label_ == 'NSGA-II':
                         continue
                     else:
                         if label_ == 'NSGA-II':
@@ -52,22 +56,22 @@ def visualize_multi_results(path):
                         title_ = 'Hypervolume'
                     else:
                         title_ = 'IGD'
-                    # ax[i][j].set_title(title_, fontsize=20, fontname='Times New Roman', fontweight='bold')
+                    ax[i][j].set_title(title_, fontsize=20, fontname='Times New Roman', fontweight='bold')
                     # ax[j].set_title(title_, fontsize=20, fontname='Times New Roman', fontweight='bold')
                 print(title)
                 if j == 0:
                     label__ = None
-                    if title == 'NAS-Bench-101':
+                    if title == '101':
                         label__ = 'NAS-101'
-                    elif title == 'NAS-Bench-201-CIFAR-10':
+                    elif title == '201-C10':
                         label__ = 'NAS-201-1'
-                    elif title == 'NAS-Bench-201-CIFAR-100':
+                    elif title == '201-C100':
                         label__ = 'NAS-201-2'
-                    elif title == 'NAS-Bench-201-ImageNet16-120':
+                    elif title == '201-IN16-120':
                         label__ = 'NAS-201-3'
-                    elif title == 'MacroNAS-CIFAR-10':
+                    elif title == 'MacroNAS-C10':
                         label__ = 'MacroNAS-C10'
-                    elif title == 'MacroNAS-CIFAR-100':
+                    elif title == 'MacroNAS-C100':
                         label__ = 'MacroNAS-C100'
                     ax[i][j].set_ylabel(label__, fontsize=20, fontname='Times New Roman', fontweight='bold')
                     # ax[j].set_ylabel(label__, fontsize=20, fontname='Times New Roman', fontweight='bold')
@@ -79,11 +83,7 @@ def visualize_multi_results(path):
                     label.set_fontsize(10)
                 handles, labels = ax[i][j].get_legend_handles_labels()
                 # handles, labels = ax[j].get_legend_handles_labels()
-                j += 1
-                if j == 2:
-                    j = 0
-                    i += 1
-    plt.rc('font', family='Times New Roman')
+        i += 1
     fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
     plt.show()
 
@@ -91,8 +91,9 @@ def visualize_multi_results(path):
 def visualize_per_result(path):
     # 28, 30, 28
     i = 0
+    plt.rc('font', family='Times New Roman')
     for folder_ in os.listdir(path):
-        if folder_ == 'HP' or folder_ == 'DPFS':
+        if folder_ == 'HP' or folder_ == 'IGD':
             print(folder_)
             fig, ax = plt.subplots()
             sub_sub_folder = path + '/' + folder_
@@ -100,6 +101,8 @@ def visualize_per_result(path):
             for label in (ax.get_xticklabels() + ax.get_yticklabels()):
                 label.set_fontsize(12)
             for file in os.listdir(sub_sub_folder):
+                attr = file.split('_')
+                print(attr)
                 label = file.split('_')[5:9]
                 title = file.split('_')[0] + '-' + file.split('_')[1]
                 bm = file.split('_')[0]
@@ -120,7 +123,7 @@ def visualize_per_result(path):
                 if label_ == 'NSGA-II w/ LS (k = 2)' or label_ == 'NSGA-II w/ SM + LS (k = 2)':
                     continue
                 else:
-                    if bm == 'MacroNAS':
+                    if bm == 'MacroNAS' or bm == '201':
                         if label_ == 'NSGA-II':
                             ax.plot(data2[0], data1, 'k--', label=label_)
                         elif label_ == 'NSGA-II w/ SM':
@@ -138,19 +141,12 @@ def visualize_per_result(path):
                             ax.plot(data2[0], data1, c='orange')
                         elif label_ == 'NSGA-II w/ SM + LS (k = 1)':
                             ax.plot(data2[0], data1, c='green')
-                    #     label_ == 'NSGA-II w/ LS (k = 1)' or label_ == 'NSGA-II w/ SM + LS (k = 1)':
-                    #     ax.plot(data2[0], data1, label=label_)
-                    # elif label_ == 'NSGA-II':
-                    #     ax.plot(data2[0], data1, 'k--', label=label_)
-                    # else:
-                    #     ax.plot(data2[0], data1, label=label_)
             handles, labels = ax.get_legend_handles_labels()
             if folder_ == 'HP':
                 ylabel = 'Hypervolume'
+                fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
             else:
                 ylabel = 'IGD'
-            plt.ylabel(ylabel, fontsize=26,  fontweight='bold', fontname='Times New Roman')
-            if i % 2 == 0:
                 if title == 'NAS-Bench-101':
                     title = 'NAS-101'
                 elif title == 'NAS-Bench-201-CIFAR-10':
@@ -164,24 +160,15 @@ def visualize_per_result(path):
                 elif title == 'MacroNAS-CIFAR-100':
                     title = 'MacroNAS-2'
                 plt.title(title, fontsize=26, fontweight='bold', fontname='Times New Roman')
-            else:
-                # plt.xlabel('#Evals', fontsize=20,  fontweight='bold', fontname='Times New Roman')
-                # plt.legend(prop={'size': 20, 'family': 'Times New Roman'})
-                plt.rc('font', family='Times New Roman')
-                fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
+            plt.ylabel(ylabel, fontsize=26,  fontweight='bold', fontname='Times New Roman')
             plt.xscale('log')
-            # plt.yscale('log')
             plt.grid()
-            # plt.legend(prop={'size': 20, 'family': 'Times New Roman'})
-            # plt.rc('font', family='Times New Roman')
-            # fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
             plt.show()
             i += 1
 
 
 if __name__ == '__main__':
-    benchmark = 'C100'
-    PATH = f'D:/Files/RESULTS/201_{benchmark}'
+    PATH = f'D:/Files/RESULTS/processing'
     # PATH = 'D:/Files/test'
-    # visualize_multi_results(PATH)
-    visualize_per_result(PATH)
+    visualize_multi_results(PATH)
+    # visualize_per_result_(PATH)

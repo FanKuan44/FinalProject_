@@ -243,9 +243,9 @@ class NSGANet(GeneticAlgorithm):
                 modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                 hashX = BENCHMARK_API.get_module_hash(modelspec)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
-                F[1] = np.round(1 - BENCHMARK_DATA[hashX]['val_acc'], 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
+                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
+                F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
 
             elif BENCHMARK_NAME == '201':
                 hashX = convert_to_hashX(X, BENCHMARK_NAME)
@@ -292,8 +292,8 @@ class NSGANet(GeneticAlgorithm):
                 modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
                 hashX = BENCHMARK_API.get_module_hash(modelspec)
 
-                F[0] = np.round((BENCHMARK_DATA[hashX]['params'] - BENCHMARK_MIN_MAX[0]) /
-                                (BENCHMARK_MIN_MAX[1] - BENCHMARK_MIN_MAX[0]), 6)
+                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
+                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
                 F[1] = self.surrogate_model.predict(np.array([X]))[0][0]
 
                 if F[1] < self.alpha:
@@ -1003,7 +1003,7 @@ if __name__ == '__main__':
     # parser.add_argument('--using_surrogate_model', type=int, default=0)
 
     parser.add_argument('--benchmark', type=str, help='benchmark name')
-    parser.add_argument('--search_space', type=str, help='search space')
+    parser.add_argument('--search_space', type=str, default='C10', help='search space')
     parser.add_argument('--path', type=str, help='path for loading data and saving results')
     args = parser.parse_args()
     ''' ------- '''
@@ -1018,28 +1018,24 @@ if __name__ == '__main__':
     BENCHMARK_NAME = args.benchmark
     SEARCH_SPACE = args.search_space
 
-    user_input = [[0, 0, '2X', 1, 10]]
+    user_input = [[0, 0, '2X', 0, 0]]
 
     PATH_DATA = args.path + '/BENCHMARKS'
 
     if BENCHMARK_NAME == '101':
         BENCHMARK_API = api.NASBench_()
-        BENCHMARK_DATA = p.load(open(PATH_DATA + '/NAS-Bench-101/data.p', 'rb'))
-        BENCHMARK_MIN_MAX = p.load(open(PATH_DATA + '/NAS-Bench-101/mi_ma_Params.p', 'rb'))
-        BENCHMARK_PF_TRUE = p.load(open(PATH_DATA + '/NAS-Bench-101/PF(nor)_Params-ValidAcc.p', 'rb'))
+        SEARCH_SPACE = ''
+    f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
+    f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
+    f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
 
-    elif BENCHMARK_NAME == '201' or BENCHMARK_NAME == 'MacroNAS':
-        f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
-        f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
-        f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
+    BENCHMARK_DATA = p.load(f_data)
+    BENCHMARK_MIN_MAX = p.load(f_mi_ma)
+    BENCHMARK_PF_TRUE = p.load(f_pf)
 
-        BENCHMARK_DATA = p.load(f_data)
-        BENCHMARK_MIN_MAX = p.load(f_mi_ma)
-        BENCHMARK_PF_TRUE = p.load(f_pf)
-
-        f_data.close()
-        f_mi_ma.close()
-        f_pf.close()
+    f_data.close()
+    f_mi_ma.close()
+    f_pf.close()
 
     print('--> Load benchmark - Done')
 
