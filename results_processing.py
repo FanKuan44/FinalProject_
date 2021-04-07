@@ -3,23 +3,40 @@ from wrap_pymoo.util.compare import find_better_idv
 import numpy as np
 from wrap_pymoo.util.IGD_calculating import calc_IGD
 import os
+from wrap_pymoo.factory_nasbench import split_to_matrix1D_and_opsINT
+from wrap_pymoo.factory_nasbench import encoding_ops, encoding_matrix
+from nasbench import wrap_api as api
+
+
+def encode_101(x):
+    matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x)
+
+    matrix_2D = encoding_matrix(matrix_1D)
+    ops_STRING = encoding_ops(ops_INT)
+
+    modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+    hashX = BENCHMARK_API.get_module_hash(modelspec)
+    return hashX
+
 
 if __name__ == '__main__':
-    f_data = open('D:/Files/benchmarks/201/C10/data.p', 'rb')
+    BENCHMARK_API = api.NASBench_()
+
+    f_data = open('D:/Files/BENCHMARKS/101/C10/data.p', 'rb')
     data = p.load(f_data)
     f_data.close()
 
-    f_mi_ma = open('D:/Files/benchmarks/201/C10/mi_ma.p', 'rb')
+    f_mi_ma = open('D:/Files/BENCHMARKS/101/C10/mi_ma.p', 'rb')
     mi_ma = p.load(f_mi_ma)
     f_mi_ma.close()
 
-    f_pf = open('D:/Files/benchmarks/201/C10/pf_test(error).p', 'rb')
+    f_pf = open('D:/Files/BENCHMARKS/101/C10/pf_test(error).p', 'rb')
     pf = p.load(f_pf)
     f_pf.close()
 
     print('load data - done')
 
-    path = 'D:/Files/RESULTS/201_C10'
+    path = 'D:/Files/RESULTS/processing/101_C10'
     files = os.listdir(path)
     for result in files:
         folders = os.listdir(path + '/' + result)
@@ -46,11 +63,13 @@ if __name__ == '__main__':
                 ea = p.load(f)
                 f.close()
                 n_gens = int(gen[4:-2])
-                arch = [''.join(idv) for idv in ea]
-                metrics = [[data[x]['FLOPs'], data[x]['test_acc']] for x in arch]
+
+                arch = [encode_101(idv) for idv in ea]
+
+                metrics = [[data[x]['Params'], data[x]['test_acc']] for x in arch]
                 metrics = np.array(metrics)
-                metrics[:, 0] = np.round((metrics[:, 0] - mi_ma['FLOPs']['min']) /
-                                         (mi_ma['FLOPs']['max'] - mi_ma['FLOPs']['min']), 6)
+                metrics[:, 0] = np.round((metrics[:, 0] - mi_ma['Params']['min']) /
+                                         (mi_ma['Params']['max'] - mi_ma['Params']['min']), 6)
                 metrics[:, 1] = np.round(1 - metrics[:, 1], 4)
 
                 l = len(metrics)

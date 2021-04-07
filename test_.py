@@ -50,18 +50,16 @@ def visualize_multi_results(path):
                             ax[i][j].plot(data2[0], data1, 'k--', label=label_)
                         else:
                             ax[i][j].plot(data2[0], data1, label=label_)
-                    # ax[j].plot(data2[0], data1, label=label_)
                 if i == 0:
                     if folder_ == 'HP':
                         title_ = 'Hypervolume'
                     else:
                         title_ = 'IGD'
                     ax[i][j].set_title(title_, fontsize=20, fontname='Times New Roman', fontweight='bold')
-                    # ax[j].set_title(title_, fontsize=20, fontname='Times New Roman', fontweight='bold')
                 print(title)
                 if j == 0:
                     label__ = None
-                    if title == '101':
+                    if title == '101-C10':
                         label__ = 'NAS-101'
                     elif title == '201-C10':
                         label__ = 'NAS-201-1'
@@ -74,15 +72,12 @@ def visualize_multi_results(path):
                     elif title == 'MacroNAS-C100':
                         label__ = 'MacroNAS-C100'
                     ax[i][j].set_ylabel(label__, fontsize=20, fontname='Times New Roman', fontweight='bold')
-                    # ax[j].set_ylabel(label__, fontsize=20, fontname='Times New Roman', fontweight='bold')
                 ax[i][j].set_xscale('log')
                 # ax[j].set_xscale('log')
                 ax[i][j].grid()
-                # ax[j].grid()
                 for label in (ax[i][j].get_xticklabels() + ax[i][j].get_yticklabels()):
-                    label.set_fontsize(10)
+                    label.set_fontsize(13)
                 handles, labels = ax[i][j].get_legend_handles_labels()
-                # handles, labels = ax[j].get_legend_handles_labels()
         i += 1
     fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
     plt.show()
@@ -123,7 +118,7 @@ def visualize_per_result(path):
                 if label_ == 'NSGA-II w/ LS (k = 2)' or label_ == 'NSGA-II w/ SM + LS (k = 2)':
                     continue
                 else:
-                    if bm == 'MacroNAS' or bm == '201':
+                    if bm == 'MacroNAS' or bm == '201' or bm == '101':
                         if label_ == 'NSGA-II':
                             ax.plot(data2[0], data1, 'k--', label=label_)
                         elif label_ == 'NSGA-II w/ SM':
@@ -147,17 +142,17 @@ def visualize_per_result(path):
                 fig.legend(handles, labels, loc='lower center', ncol=4, fontsize=18, frameon=False)
             else:
                 ylabel = 'IGD'
-                if title == 'NAS-Bench-101':
+                if title == '101-C10':
                     title = 'NAS-101'
-                elif title == 'NAS-Bench-201-CIFAR-10':
+                elif title == '201-C10':
                     title = 'NAS-201-1'
-                elif title == 'NAS-Bench-201-CIFAR-100':
+                elif title == '201-C100':
                     title = 'NAS-201-2'
-                elif title == 'NAS-Bench-201-ImageNet16-120':
+                elif title == '201-IN16-120':
                     title = 'NAS-201-3'
-                elif title == 'MacroNAS-CIFAR-10':
+                elif title == 'MacroNAS-C10':
                     title = 'MacroNAS-'
-                elif title == 'MacroNAS-CIFAR-100':
+                elif title == 'MacroNAS-C100':
                     title = 'MacroNAS-2'
                 plt.title(title, fontsize=26, fontweight='bold', fontname='Times New Roman')
             plt.ylabel(ylabel, fontsize=26,  fontweight='bold', fontname='Times New Roman')
@@ -168,7 +163,7 @@ def visualize_per_result(path):
 
 
 if __name__ == '__main__':
-    PATH = f'D:/Files/RESULTS/processing'
-    # PATH = 'D:/Files/test'
-    visualize_multi_results(PATH)
-    # visualize_per_result_(PATH)
+    PATH = f'D:/Files/RESULTS/processing/101_C10'
+    # PATH = 'D:/Files/RESULTS/201_C10'
+    # visualize_multi_results(PATH)
+    visualize_per_result(PATH)

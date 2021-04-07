@@ -19,19 +19,18 @@ def visualize_2d(objective_0, objective_1, place_to_plot, label, axis_labels=('x
 '''------ Visualize "Distance from True Pareto Front to Approximate Pareto Front" and "Number of Evaluations" ------'''
 
 
-def get_avg_dpfs_and_no_evaluations(paths):
-    dpfs_avg_each_path = []
+def get_avg_IGD_and_no_evaluations(paths):
+    IGD_avg_each_path = []
     no_evaluations_avg_each_path = []
 
     for path in paths:
         no_evaluations_each_exp = []
-        dpfs_each_exp = []
+        IGD_each_exp = []
 
-        number_of_experiments = len(os.listdir(path))
         min_total_no_evaluations = np.inf
         no_evaluations_gen_0 = 0
 
-        for i in range(number_of_experiments):
+        for i in range(N_RUNS):
             path_ = path + f'/{i}'
             total_no_evaluations, _ = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
             no_evaluations_gen_0 = total_no_evaluations[0]
@@ -39,38 +38,38 @@ def get_avg_dpfs_and_no_evaluations(paths):
 
         max_total_no_evaluations = min_total_no_evaluations // no_evaluations_gen_0 * no_evaluations_gen_0
 
-        for i in range(number_of_experiments):
+        for i in range(N_RUNS):
             path_ = path + f'/{i}'
 
-            total_no_evaluations, total_dpfs = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
+            total_no_evaluations, total_IGD = pickle.load(open(f'{path_}/no_eval_and_IGD_.p', 'rb'))
 
             # Interpolation
             new_no_eval_each_gen = np.arange(no_evaluations_gen_0, max_total_no_evaluations + 1, no_evaluations_gen_0//2)
 
-            f = interp1d(total_no_evaluations, total_dpfs)
+            f = interp1d(total_no_evaluations, total_IGD)
             new_dpf_each_gen = f(new_no_eval_each_gen)
 
-            dpfs_each_exp.append(new_dpf_each_gen)
+            IGD_each_exp.append(new_dpf_each_gen)
             no_evaluations_each_exp.append(new_no_eval_each_gen)
 
-            print(new_no_eval_each_gen)
+            print(new_no_eval_each_gen[-1])
 
-        dpfs_each_exp = np.array(dpfs_each_exp)
+        IGD_each_exp = np.array(IGD_each_exp)
         no_evaluations_each_exp = np.array(no_evaluations_each_exp)
 
-        pickle.dump([dpfs_each_exp, no_evaluations_each_exp], open(f'{FOLDER}/IGD/{path.split("/")[-1]}_igd.p', 'wb'))
+        pickle.dump([IGD_each_exp, no_evaluations_each_exp], open(f'{FOLDER}/IGD/{path.split("/")[-1]}_igd.p', 'wb'))
 
-        dpf_avg = np.sum(dpfs_each_exp, axis=0) / len(dpfs_each_exp)
+        dpf_avg = np.sum(IGD_each_exp, axis=0) / len(IGD_each_exp)
         no_eval_avg = np.sum(no_evaluations_each_exp, axis=0) / len(no_evaluations_each_exp)
 
-        dpfs_avg_each_path.append(dpf_avg)
+        IGD_avg_each_path.append(dpf_avg)
         no_evaluations_avg_each_path.append(no_eval_avg)
 
-    return dpfs_avg_each_path, no_evaluations_avg_each_path
+    return IGD_avg_each_path, no_evaluations_avg_each_path
 
 
-def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
-    dpfs_avg_each_path, no_evaluations_avg_each_path = get_avg_dpfs_and_no_evaluations(paths)
+def visualize_IGD_and_no_evaluations_algorithms(paths, show_fig=False, save_fig=False, log_x=True, log_y=True):
+    IGD_avg_each_path, no_evaluations_avg_each_path = get_avg_IGD_and_no_evaluations(paths)
     fig, ax = plt.subplots(1)
     axis_lbs = ['No.Evaluations', 'IGD']
 
@@ -88,7 +87,7 @@ def visualize_dpfs_and_no_evaluations_algorithms(paths, show_fig=False, save_fig
         #     label_ = f'NSGA-II with Using Surrogate Model + IPS k = {int(label[5])}'
         # else:
         label_ = label
-        visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=dpfs_avg_each_path[i], place_to_plot=ax,
+        visualize_2d(objective_0=no_evaluations_avg_each_path[i], objective_1=IGD_avg_each_path[i], place_to_plot=ax,
                      axis_labels=axis_lbs, label=label_, legend=True)
 
     plt.grid()
@@ -114,9 +113,8 @@ def find_reference_point(paths):
     max_f0 = -np.inf
     max_f1 = -np.inf
     for path in paths:
-        number_of_folders = len(os.listdir(path))
-        for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/reference_point_.p'
+        for i in range(N_RUNS):
+            path_ = path + f'/{i}/reference_point_.p'
 
             f0, f1 = pickle.load(open(path_, 'rb'))
             max_f0 = max(max_f0, f0)
@@ -142,10 +140,8 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
 
         eval_gen_0 = 0
 
-        number_of_folders = len(os.listdir(path))
-
-        for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf1_eval'
+        for i in range(N_RUNS):
+            path_ = path + f'/{i}/pf1_eval'
             pf_and_eval_folder = os.listdir(path_)
 
             # Sort files by name
@@ -159,8 +155,8 @@ def get_avg_hp_and_evaluate(paths, hp_calculate, rf):
 
         upper = min_eval // eval_gen_0 * eval_gen_0
 
-        for folder_i in range(number_of_folders):
-            path_ = path + f'/{folder_i}/pf1_eval'
+        for i in range(N_RUNS):
+            path_ = path + f'/{i}/pf1_eval'
 
             pf_and_eval_folder = os.listdir(path_)
 
@@ -258,10 +254,11 @@ def main():
     paths = []
     for path in os.listdir(FOLDER):
         paths.append(FOLDER + '/' + path)
+
     os.mkdir(FOLDER + '/' + 'IGD')
     os.mkdir(FOLDER + '/' + 'HP')
 
-    visualize_dpfs_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
+    visualize_IGD_and_no_evaluations_algorithms(paths=paths, show_fig=True, save_fig=False, log_x=LOG_X, log_y=LOG_Y)
 
     # visualize_pf_approximate_2_algorithm(path1=path_1, path2=path_2, benchmark=benchmark, visualize_all=True,
     #                                      plot_scatter=True, show_fig=False, save_fig=True, visualize_pf_true=True)
@@ -273,8 +270,9 @@ if __name__ == '__main__':
     SAVE = False
     LOG_X = True
     LOG_Y = False
+    N_RUNS = 21
     benchmark = 'C10'
-    FOLDER = f'D:/Files/RESULTS/201_{benchmark}'
+    FOLDER = f'D:/Files/RESULTS/processing/101_{benchmark}'
     # FOLDER = 'D:/Files/RESULTS/processing'
     if SAVE:
         now = datetime.now()

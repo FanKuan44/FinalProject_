@@ -8,12 +8,12 @@ from statistics import stdev
 
 if __name__ == '__main__':
     alpha = 0.01
-    folder = 'D:/Files/FINAL-RESULTS/MacroNAS/MacroNAS-CIFAR-100'
+    folder = 'D:/Files/FINAL-RESULTS/MicroNAS/101_C10'
     points = [1000, 2000, 5000, 10000, 30000]
     # points = [100, 200, 500, 1000, 3000]
 
     for folder_ in os.listdir(folder):
-        if folder_ == 'HP' or folder_ == 'DPFS':
+        if folder_ == 'IGD' or folder_ == 'HP':
             i = 0
             avg_dpfs_lst = []
             ori = []

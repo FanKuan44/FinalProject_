@@ -1,39 +1,3 @@
-# import argparse
-# import os
-# import matplotlib.pyplot as plt
-# import numpy as np
-# import pickle as pk
-# import timeit
-# import torch
-#
-# from acc_predictor.factory import get_acc_predictor
-# from datetime import datetime
-#
-# from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
-# from pymoo.operators.default_operators import set_if_none
-# from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
-# from pymoo.operators.sampling.random_sampling import RandomSampling
-# from pymoo.operators.selection.tournament_selection import TournamentSelection
-# from pymoo.util.display import disp_multi_objective
-# from pymoo.util.non_dominated_sorting import NonDominatedSorting
-# # =========================================================================================================
-# # Implementation based on nsga2 from https://github.com/msu-coinlab/pymoo
-# # =========================================================================================================
-# from nasbench import wrap_api as api
-#
-# from wrap_pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
-#
-# from wrap_pymoo.model.individual import MyIndividual as Individual
-# from wrap_pymoo.model.population import MyPopulation as Population
-#
-# from wrap_pymoo.util.compare import find_better_idv
-# from wrap_pymoo.util.IGD_calculating import cal_IGD
-# from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
-# from wrap_pymoo.util.survial_selection import RankAndCrowdingSurvival
-# from wrap_pymoo.util.tournament_selection import binary_tournament
-#
-# from wrap_pymoo.factory_nasbench import combine_matrix1D_and_opsINT, split_to_matrix1D_and_opsINT, create_model
-# from wrap_pymoo.factory_nasbench import encoding_ops, decoding_ops, encoding_matrix, decoding_matrix
 from lib import *
 
 
@@ -58,6 +22,34 @@ def encode_(X):
         modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
         hashX.append(BENCHMARK_API.get_module_hash(modelspec))
     return np.array(hashX)
+
+
+def encode_for_evaluating(x, benchmark):
+    if benchmark == '101':
+        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x)
+
+        matrix_2D = encoding_matrix(matrix_1D)
+        ops_STRING = encoding_ops(ops_INT)
+
+        modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+        hashX = BENCHMARK_API.get_module_hash(modelspec)
+    else:
+        if not isinstance(x, list):
+            x = x.tolist()
+        hashX = ''.join(x)
+    return hashX
+
+
+def encode_for_predicting(x, benchmark):
+    if benchmark == '101':
+        return np.array([x])
+    else:
+        if isinstance(x, list):
+            x = np.array(x)
+        if benchmark == 'MacroNAS':
+            x = np.where(x == 'I', 0, x)
+        encodeX = np.array(x, dtype=np.int)
+    return np.array([encodeX])
 
 
 # Using for MarcoNAS
@@ -225,81 +217,23 @@ class NSGANet(GeneticAlgorithm):
     def evaluate(self, X, using_surrogate_model=False, count_nE=True):
         F = np.full(2, fill_value=np.nan)
 
+        hashX = encode_for_evaluating(X, BENCHMARK_NAME)
+        F[0] = round((BENCHMARK_DATA[hashX][OBJECTIVE_1] - BENCHMARK_MIN_MAX[OBJECTIVE_1]['min']) /
+                     (BENCHMARK_MIN_MAX[OBJECTIVE_1]['max'] - BENCHMARK_MIN_MAX[OBJECTIVE_1]['min']), 6)
+
         twice = False  # --> using on 'surrogate model method'
         if not using_surrogate_model:
-            if BENCHMARK_NAME == 'MacroNAS':
-                hashX = ''.join(X.tolist())
-
-                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
-                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
-                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
-
-            elif BENCHMARK_NAME == '101':
-                matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
-
-                matrix_2D = encoding_matrix(matrix_1D)
-                ops_STRING = encoding_ops(ops_INT)
-
-                modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
-                hashX = BENCHMARK_API.get_module_hash(modelspec)
-
-                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
-                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
-                F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
-
-            elif BENCHMARK_NAME == '201':
-                hashX = convert_to_hashX(X, BENCHMARK_NAME)
-
-                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
-                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
-                F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
-
+            F[1] = 1 - BENCHMARK_DATA[hashX][OBJECTIVE_2]
             if count_nE:
                 self.nEs += 1
             self.F_total.append(F[1])
         else:
-            if BENCHMARK_NAME == 'MacroNAS':
-                encode_X = encode(X, BENCHMARK_NAME)
-                hashX = ''.join(X.tolist())
-
-                F[0] = round((BENCHMARK_DATA[hashX]['MMACs'] - BENCHMARK_MIN_MAX['MMACs']['min']) /
-                             (BENCHMARK_MIN_MAX['MMACs']['max'] - BENCHMARK_MIN_MAX['MMACs']['min']), 6)
-                F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
-
-                if F[1] < self.alpha:
-                    twice = True
-                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
-                    self.nEs += 1
-
-            elif BENCHMARK_NAME == '201':
-                hashX = convert_to_hashX(X, BENCHMARK_NAME)
-                encode_X = encode(X, BENCHMARK_NAME)
-
-                F[0] = round((BENCHMARK_DATA[hashX]['FLOPs'] - BENCHMARK_MIN_MAX['FLOPs']['min']) /
-                             (BENCHMARK_MIN_MAX['FLOPs']['max'] - BENCHMARK_MIN_MAX['FLOPs']['min']), 6)
-                F[1] = self.surrogate_model.predict(np.array([encode_X]))[0][0]
-
-                if F[1] < self.alpha:
-                    twice = True
-                    F[1] = round(1 - BENCHMARK_DATA[hashX]['valid_acc'], 4)
-                    self.nEs += 1
-
-            else:
-                matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(X)
-
-                matrix_2D = encoding_matrix(matrix_1D)
-                ops_STRING = encoding_ops(ops_INT)
-                modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
-                hashX = BENCHMARK_API.get_module_hash(modelspec)
-
-                F[0] = round((BENCHMARK_DATA[hashX]['Params'] - BENCHMARK_MIN_MAX['Params']['min']) /
-                             (BENCHMARK_MIN_MAX['Params']['max'] - BENCHMARK_MIN_MAX['Params']['min']), 6)
-                F[1] = self.surrogate_model.predict(np.array([X]))[0][0]
-
-                if F[1] < self.alpha:
-                    twice = True
-                    F[1] = 1 - BENCHMARK_DATA[hashX]['valid_acc']
-                    self.nEs += 1
+            encodeX = encode_for_predicting(X, BENCHMARK_NAME)
+            F[1] = self.surrogate_model.predict(encodeX)[0][0]
+            if F[1] < self.alpha:
+                twice = True
+                F[1] = 1 - BENCHMARK_DATA[hashX][OBJECTIVE_2]
+                self.nEs += 1
             if twice:
                 self.F_total.append(F[1])
         return F, twice
@@ -662,7 +596,7 @@ class NSGANet(GeneticAlgorithm):
             ops = ['0', '1', '2', '3', '4']
 
         for i in range(len(S)):
-            # Avoid stuck because don't find any better architecture
+            # Avoid stuck because do not find any better architectures
             tmp_m_searches = 100
             tmp_n_searches = 0
 
@@ -949,12 +883,12 @@ class NSGANet(GeneticAlgorithm):
         if SAVE:
             p.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
             # visualize IGD
-            p.dump([self.no_eval, self.IGD], open(f'{self.path}/no_eval_and_IGD.p', 'wb'))
+            p.dump([self.no_eval, self.IGD], open(f'{self.path}/#Evals_IGD.p', 'wb'))
             plt.plot(self.no_eval, self.IGD)
-            plt.xlabel('No.Evaluations')
+            plt.xlabel('#Evals')
             plt.ylabel('IGD')
             plt.grid()
-            plt.savefig(f'{self.path}/IGD_and_no_evaluations')
+            plt.savefig(f'{self.path}/#Evals-IGD')
             plt.clf()
 
             # visualize elitist archive
@@ -963,12 +897,7 @@ class NSGANet(GeneticAlgorithm):
             plt.scatter(self.A_F[:, 0], self.A_F[:, 1], c='red', s=15,
                         label='elitist archive')
 
-            if BENCHMARK_NAME == '101':
-                plt.xlabel('Params (norm)')
-            elif BENCHMARK_NAME == 'MacroNAS':
-                plt.xlabel('MMACs (norm)')
-            else:
-                plt.xlabel('FLOPs (norm)')
+            plt.xlabel(OBJECTIVE_1 + '(normalize)')
             plt.ylabel('Validation Error')
 
             plt.legend()
@@ -979,32 +908,11 @@ class NSGANet(GeneticAlgorithm):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-
-    # # hyper-parameters for problem
-    # parser.add_argument('--benchmark_name', type=str, default='cifar10',
-    #                     help='the benchmark used for optimizing')
-    # parser.add_argument('--max_no_evaluations', type=int, default=10000)
-    #
-    # # hyper-parameters for main
-    # parser.add_argument('--seed', type=int, default=0, help='random seed')
-    # parser.add_argument('--number_of_runs', type=int, default=1, help='number of runs')
-    # parser.add_argument('--save', type=int, default=1, help='save log file')
-    #
-    # # hyper-parameters for algorithm (NSGAII)
-    # parser.add_argument('--algorithm_name', type=str, default='nsga', help='name of algorithm used')
-    # parser.add_argument('--pop_size', type=int, default=40, help='population size of networks')
-    # parser.add_argument('--crossover_type', type=str, default='UX')
-    #
-    # parser.add_argument('--local_search_on_pf', type=int, default=0, help='local search on pareto front')
-    # parser.add_argument('--local_search_on_knees', type=int, default=0, help='local search on knee solutions')
-    # parser.add_argument('--local_search_on_n_points', type=int, default=1)
-    # parser.add_argument('--followed_bosman_paper', type=int, default=0, help='local search followed by bosman paper')
-    #
-    # parser.add_argument('--using_surrogate_model', type=int, default=0)
-
     parser.add_argument('--benchmark', type=str, help='benchmark name')
     parser.add_argument('--search_space', type=str, default='C10', help='search space')
     parser.add_argument('--path', type=str, help='path for loading data and saving results')
+    parser.add_argument('--n_runs', type=int, default=21, help='number of experiments runs')
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
     args = parser.parse_args()
     ''' ------- '''
     SAVE = True
@@ -1012,11 +920,19 @@ if __name__ == '__main__':
 
     ALGORITHM_NAME = 'NSGA-II'
 
-    NUMBER_OF_RUNS = 1
-    INIT_SEED = 0
+    NUMBER_OF_RUNS = args.n_runs
+    INIT_SEED = args.seed
 
     BENCHMARK_NAME = args.benchmark
     SEARCH_SPACE = args.search_space
+
+    if BENCHMARK_NAME == 'MacroNAS':
+        OBJECTIVE_1 = 'MMACs'
+    elif BENCHMARK_NAME == '101':
+        OBJECTIVE_1 = 'Params'
+    else:
+        OBJECTIVE_1 = 'FLOPs'
+    OBJECTIVE_2 = 'valid_acc'
 
     user_input = [[0, 0, '2X', 0, 0]]
 
@@ -1024,7 +940,6 @@ if __name__ == '__main__':
 
     if BENCHMARK_NAME == '101':
         BENCHMARK_API = api.NASBench_()
-        SEARCH_SPACE = ''
     f_data = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/data.p', 'rb')
     f_mi_ma = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/mi_ma.p', 'rb')
     f_pf = open(PATH_DATA + f'/{BENCHMARK_NAME}/{SEARCH_SPACE}/pf_valid(error).p', 'rb')
@@ -1065,10 +980,19 @@ if __name__ == '__main__':
                                 f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
                                 f'd%d_m%m_H%H_M%M_S%S')
         ROOT_PATH = args.path + '/RESULTS/' + dir_name
-
         # Create root folder
         os.mkdir(ROOT_PATH)
         print(f'--> Create folder {ROOT_PATH} - Done\n')
+
+        f_log = open(ROOT_PATH + '/log_file.txt', 'w')
+        f_log.write(f'- #RUNS: {NUMBER_OF_RUNS}\n- BENCHMARK: {BENCHMARK_NAME}\n- SEARCH_SPACE: {SEARCH_SPACE}\n'
+                    f'- OBJECTIVE 1: {OBJECTIVE_1}\n - OBJECTIVE 2: Validation error\n'
+                    f'- ALGORITHM: {ALGORITHM_NAME}\n- POP_SIZE: {POP_SIZE}\n- #MAX_EVALS: {MAX_NO_EVALUATIONS}\n'
+                    f'- CROSSOVER_TYPE: {CROSSOVER_TYPE}\n- LOCAL_SEARCH_ON_KNEE_SOLUTIONS: '
+                    f'{bool(LOCAL_SEARCH_ON_KNEE_SOLUTIONS)}\n- LOCAL_SEARCH_ON_#POINTS: {LOCAL_SEARCH_ON_N_POINTS}\n'
+                    f'- USING_SURROGATE_MODEL: {bool(USING_SURROGATE_MODEL)}\n- UPDATE_MODEL_AFTER_#GENS: '
+                    f'{UPDATE_MODEL_AFTER_N_GENS}')
+        f_log.close()
 
         for i_run in range(NUMBER_OF_RUNS):
             SEED = INIT_SEED + i_run * 100
