@@ -24,6 +24,7 @@ from scipy.spatial.distance import cdist
 
 from nasbench import wrap_api as api
 
+from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.util.compare import find_better_idv
 from wrap_pymoo.util.IGD_calculating import calc_IGD
@@ -361,51 +362,29 @@ class MOEADNET(GeneticAlgorithm):
 
         while True:
             if BENCHMARK_NAME == '101':
-                for j in range(len(P_)):
-                    if np.random.random() < pC:
-                        new_O1_X, new_O2_X = crossover(P_[j][0].get('X'), P_[j][1].get('X'), self.typeC)
+                if np.random.random() < pC:
+                    new_O1_X, new_O2_X = crossover(P_[0].get('X'), P_[1].get('X'), self.typeC)
 
-                        matrix1_1D, ops1_INT = split_to_matrix1D_and_opsINT(new_O1_X)
-                        matrix2_1D, ops2_INT = split_to_matrix1D_and_opsINT(new_O2_X)
+                    matrix1_1D, ops1_INT = split_to_matrix1D_and_opsINT(new_O1_X)
+                    matrix2_1D, ops2_INT = split_to_matrix1D_and_opsINT(new_O2_X)
 
-                        matrix1_2D = encoding_matrix(matrix1_1D)
-                        matrix2_2D = encoding_matrix(matrix2_1D)
+                    matrix1_2D = encoding_matrix(matrix1_1D)
+                    matrix2_2D = encoding_matrix(matrix2_1D)
 
-                        ops1_STRING = encoding_ops(ops1_INT)
-                        ops2_STRING = encoding_ops(ops2_INT)
+                    ops1_STRING = encoding_ops(ops1_INT)
+                    ops2_STRING = encoding_ops(ops2_INT)
 
-                        new_MS1 = api.ModelSpec(matrix=matrix1_2D, ops=ops1_STRING)
-                        new_MS2 = api.ModelSpec(matrix=matrix2_2D, ops=ops2_STRING)
+                    new_MS1 = api.ModelSpec(matrix=matrix1_2D, ops=ops1_STRING)
+                    new_MS2 = api.ModelSpec(matrix=matrix2_2D, ops=ops2_STRING)
 
-                        new_MS_lst = [new_MS1, new_MS2]
-                        new_O_X_lst = [new_O1_X, new_O2_X]
+                    new_MS_lst = [new_MS1, new_MS2]
+                    new_O_X_lst = [new_O1_X, new_O2_X]
 
-                        for m in range(2):
-                            if BENCHMARK_API.is_valid(new_MS_lst[m]):
-                                new_O_hashX = BENCHMARK_API.get_module_hash(new_MS_lst[m])
-                                if nCOs <= 100:
-                                    if (new_O_hashX not in O_hashX) and (new_O_hashX not in self.DS):
-                                        O_hashX.append(new_O_hashX)
-
-                                        new_O_F, twice = self.evaluate(X=new_O_X_lst[m],
-                                                                       using_surrogate_model=self.using_surrogate_model)
-                                        O[i].set('X', new_O_X_lst[m])
-                                        O[i].set('hashX', new_O_hashX)
-                                        O[i].set('F', new_O_F)
-
-                                        if not self.using_surrogate_model:
-                                            self.update_A(O[i])
-                                        else:
-                                            if twice:
-                                                self.update_A(O[i])
-                                            else:
-                                                self.training_data.append(O[i])
-                                                self.update_fake_A(O[i])
-
-                                        i += 1
-                                        if i == len(P):
-                                            return O
-                                else:
+                    for m in range(2):
+                        if BENCHMARK_API.is_valid(new_MS_lst[m]):
+                            new_O_hashX = BENCHMARK_API.get_module_hash(new_MS_lst[m])
+                            if nCOs <= 100:
+                                if (new_O_hashX not in O_hashX) and (new_O_hashX not in self.DS):
                                     O_hashX.append(new_O_hashX)
 
                                     new_O_F, twice = self.evaluate(X=new_O_X_lst[m],
@@ -426,49 +405,48 @@ class MOEADNET(GeneticAlgorithm):
                                     i += 1
                                     if i == len(P):
                                         return O
-                    else:
-                        for m in range(2):
-                            O[i].set('X', P_[j][m].get('X'))
-                            O[i].set('hashX', P_[j][m].get('hashX'))
-                            O[i].set('F', P_[j][m].get('F'))
-                            i += 1
-                            if i == len(P):
-                                return O
-            else:
-                for j in range(len(P_)):
-                    if np.random.random() < pC:
-                        o1_X, o2_X = crossover(P_[j][0].get('X'), P_[j][1].get('X'), self.typeC)
+                            else:
+                                O_hashX.append(new_O_hashX)
 
-                        o_X = [o1_X, o2_X]
-                        o_hashX = [convert_to_hashX(o1_X, BENCHMARK_NAME), convert_to_hashX(o2_X, BENCHMARK_NAME)]
-
-                        if nCOs <= 100:
-                            for m in range(2):
-                                if (o_hashX[m] not in O_hashX) and (o_hashX[m] not in self.DS):
-                                    O_hashX.append(o_hashX[m])
-                                    o_F, twice = self.evaluate(X=o_X[m],
+                                new_O_F, twice = self.evaluate(X=new_O_X_lst[m],
                                                                using_surrogate_model=self.using_surrogate_model)
+                                O[i].set('X', new_O_X_lst[m])
+                                O[i].set('hashX', new_O_hashX)
+                                O[i].set('F', new_O_F)
 
-                                    O[i].set('X', o_X[m])
-                                    O[i].set('hashX', o_hashX[m])
-                                    O[i].set('F', o_F)
-
-                                    if not self.using_surrogate_model:
+                                if not self.using_surrogate_model:
+                                    self.update_A(O[i])
+                                else:
+                                    if twice:
                                         self.update_A(O[i])
                                     else:
-                                        if twice:
-                                            self.update_A(O[i])
-                                        else:
-                                            self.training_data.append(O[i])
-                                            self.update_fake_A(O[i])
+                                        self.training_data.append(O[i])
+                                        self.update_fake_A(O[i])
 
-                                    i += 1
-                                    if i == len(P):
-                                        return O
-                        else:
-                            for m in range(2):
+                                i += 1
+                                if i == len(P_):
+                                    return O
+                else:
+                    for m in range(2):
+                        O[i].set('X', P_[m].get('X'))
+                        O[i].set('hashX', P_[m].get('hashX'))
+                        O[i].set('F', P_[m].get('F'))
+                        i += 1
+                        if i == len(P_):
+                            return O
+            else:
+                if np.random.random() < pC:
+                    o1_X, o2_X = crossover(P_[0].get('X'), P_[1].get('X'), self.typeC)
+
+                    o_X = [o1_X, o2_X]
+                    o_hashX = [convert_to_hashX(o1_X, BENCHMARK_NAME), convert_to_hashX(o2_X, BENCHMARK_NAME)]
+
+                    if nCOs <= 100:
+                        for m in range(2):
+                            if (o_hashX[m] not in O_hashX) and (o_hashX[m] not in self.DS):
                                 O_hashX.append(o_hashX[m])
-                                o_F, twice = self.evaluate(X=o_X[m], using_surrogate_model=self.using_surrogate_model)
+                                o_F, twice = self.evaluate(X=o_X[m],
+                                                           using_surrogate_model=self.using_surrogate_model)
 
                                 O[i].set('X', o_X[m])
                                 O[i].set('hashX', o_hashX[m])
@@ -482,18 +460,39 @@ class MOEADNET(GeneticAlgorithm):
                                     else:
                                         self.training_data.append(O[i])
                                         self.update_fake_A(O[i])
-                                i += 1
-                                if i == len(P):
-                                    return O
 
+                                i += 1
+                                if i == len(P_):
+                                    return O
                     else:
                         for m in range(2):
-                            O[i].set('X', P_[j][m].get('X'))
-                            O[i].set('hashX', P_[j][m].get('hashX'))
-                            O[i].set('F', P_[j][m].get('F'))
+                            O_hashX.append(o_hashX[m])
+                            o_F, twice = self.evaluate(X=o_X[m], using_surrogate_model=self.using_surrogate_model)
+
+                            O[i].set('X', o_X[m])
+                            O[i].set('hashX', o_hashX[m])
+                            O[i].set('F', o_F)
+
+                            if not self.using_surrogate_model:
+                                self.update_A(O[i])
+                            else:
+                                if twice:
+                                    self.update_A(O[i])
+                                else:
+                                    self.training_data.append(O[i])
+                                    self.update_fake_A(O[i])
                             i += 1
-                            if i == len(P):
+                            if i == len(P_):
                                 return O
+
+                else:
+                    for m in range(2):
+                        O[i].set('X', P_[m].get('X'))
+                        O[i].set('hashX', P_[m].get('hashX'))
+                        O[i].set('F', P_[m].get('F'))
+                        i += 1
+                        if i == len(P_):
+                            return O
             nCOs += 1
 
     def _mutation(self, P, O):
@@ -506,9 +505,8 @@ class MOEADNET(GeneticAlgorithm):
         old_O_X = O.get('X')
 
         i = 0
-        full = False
         pM = 1 / len(old_O_X[0])
-        while not full:
+        while True:
             if BENCHMARK_NAME == '101':
                 for x in old_O_X:
                     matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(x)
@@ -555,9 +553,8 @@ class MOEADNET(GeneticAlgorithm):
                                     self.update_fake_A(new_O[i])
 
                             i += 1
-                            if i == len(P):
-                                full = True
-                                break
+                            if i == len(O):
+                                return new_O
 
             else:
                 if BENCHMARK_NAME == 'MacroNAS':
@@ -598,11 +595,8 @@ class MOEADNET(GeneticAlgorithm):
                                 self.update_fake_A(new_O[i])
 
                         i += 1
-                        if i == len(P):
-                            full = True
-                            break
-
-        return new_O
+                        if i == len(O):
+                            return new_O
 
     def _initialize_custom(self):
         self._decomposition = Tchebicheff()
@@ -1005,7 +999,7 @@ if __name__ == '__main__':
         OBJECTIVE_1 = 'FLOPs'
     OBJECTIVE_2 = 'valid_acc'
 
-    user_input = [[0, 0, '2X', 0, 0]]
+    user_input = [[0, 0, '2X', 1, 10]]
 
     PATH_DATA = args.path + '/BENCHMARKS'
 
@@ -1057,9 +1051,9 @@ if __name__ == '__main__':
 
         f_log = open(ROOT_PATH + '/log_file.txt', 'w')
         f_log.write(f'- #RUNS: {NUMBER_OF_RUNS}\n- BENCHMARK: {BENCHMARK_NAME}\n- SEARCH_SPACE: {SEARCH_SPACE}\n'
-                    f'- OBJECTIVE 1: {OBJECTIVE_1}\n - OBJECTIVE 2: Validation error\n'
+                    f'- OBJECTIVE 1: {OBJECTIVE_1}\n- OBJECTIVE 2: Validation error\n'
                     f'- ALGORITHM: {ALGORITHM_NAME}\n- POP_SIZE: {POP_SIZE}\n- #MAX_EVALS: {MAX_NO_EVALUATIONS}\n'
-                    f'-N_POINTS: {N_POINTS}\n- CROSSOVER_TYPE: {CROSSOVER_TYPE}\n- LOCAL_SEARCH_ON_KNEE_SOLUTIONS: '
+                    f'- N_POINTS: {N_POINTS}\n- CROSSOVER_TYPE: {CROSSOVER_TYPE}\n- LOCAL_SEARCH_ON_KNEE_SOLUTIONS: '
                     f'{bool(LOCAL_SEARCH_ON_KNEE_SOLUTIONS)}\n- LOCAL_SEARCH_ON_#POINTS: {LOCAL_SEARCH_ON_N_POINTS}\n'
                     f'- USING_SURROGATE_MODEL: {bool(USING_SURROGATE_MODEL)}\n- UPDATE_MODEL_AFTER_#GENS: '
                     f'{UPDATE_MODEL_AFTER_N_GENS}')
