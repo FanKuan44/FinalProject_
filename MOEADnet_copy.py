@@ -24,7 +24,6 @@ from scipy.spatial.distance import cdist
 
 from nasbench import wrap_api as api
 
-from wrap_pymoo.model.individual import MyIndividual as Individual
 from wrap_pymoo.model.population import MyPopulation as Population
 from wrap_pymoo.util.compare import find_better_idv
 from wrap_pymoo.util.IGD_calculating import calc_IGD
@@ -179,6 +178,10 @@ class MOEADNET(GeneticAlgorithm):
         self.neighbors = np.argsort(cdist(self.ref_dirs, self.ref_dirs), axis=1, kind='quicksort')[:, :self.n_neighbors]
 
         ''' Custom '''
+        self.NIS = 0
+        self.nEs_converging = 0
+        self.converging = False
+
         self.typeC = typeC
 
         self.alpha = 1
@@ -199,6 +202,9 @@ class MOEADNET(GeneticAlgorithm):
         self.update_model = True
         self.n_updates = 0
         self.training_data = []
+
+        self.Y_hat = []
+        self.Y = []
 
         self.nEs = 0
         self.path = path
@@ -277,16 +283,20 @@ class MOEADNET(GeneticAlgorithm):
 
         twice = False  # --> using on 'surrogate model method'
         if not using_surrogate_model:
-            F[1] = 1 - BENCHMARK_DATA[hashX][OBJECTIVE_2]
+            F[1] = round(1 - BENCHMARK_DATA[hashX][OBJECTIVE_2], 4)
             if count_nE:
                 self.nEs += 1
             self.F_total.append(F[1])
         else:
             encodeX = encode_for_predicting(X, BENCHMARK_NAME)
             F[1] = self.surrogate_model.predict(encodeX)[0][0]
+            old_F = F[1]
             if F[1] < self.alpha:
                 twice = True
-                F[1] = 1 - BENCHMARK_DATA[hashX][OBJECTIVE_2]
+                F[1] = round(1 - BENCHMARK_DATA[hashX][OBJECTIVE_2], 4)
+                if self.update_model:
+                    self.Y_hat.append(old_F)
+                    self.Y.append(F[1])
                 self.nEs += 1
             if twice:
                 self.F_total.append(F[1])
@@ -847,21 +857,20 @@ class MOEADNET(GeneticAlgorithm):
         while self.nEs < self.m_nEs:
             self.n_gen += 1
 
-            if self.IGD[-1] != 0.0:
+            if not self.converging:
                 self.pop = self._next(self.pop)
             else:
-                self.nEs += self.pop_size
+                self.nEs += (self.m_nEs - self.nEs_converging) // 10
 
             self._do_each_gen()
         self._finalize()
-        return
 
     def _do_each_gen(self, first=False):
         if self.using_surrogate_model:
             self.alpha = np.mean(self.F_total)
 
-            if self.m_nEs - self.nEs < 2 * self.m_nEs // 3 or self.n_updates == 15:
-                self.update_model = False
+            # if self.m_nEs - self.nEs < 2 * self.m_nEs // 3 or self.n_updates == 15:
+            #     self.update_model = False
 
             if not first:
                 tmp_set_X = np.array(self.tmp_A_X)
@@ -876,66 +885,84 @@ class MOEADNET(GeneticAlgorithm):
                         tmp_set[i].set('F', F)
                         self.update_A(tmp_set[i])
 
-            if self.n_gen % self.update_model_after_n_gens == 0:
-                data = np.array(self.training_data)
-                self.training_data = []
+            if self.update_model and self.n_gen % self.update_model_after_n_gens == 0:
+                self.Y_hat = np.array(self.Y_hat)
+                self.Y = np.array(self.Y)
+                error = 1/len(self.Y) * np.sum((self.Y - self.Y_hat)**2)
+                if error <= 1e-3:
+                    self.update_model = False
+                else:
+                    self.Y_hat, self.Y = [], []
+                    data = np.array(self.training_data)
+                    self.training_data = []
 
-                X = []
-                Y = []
-                checked = []
-                for i in range(len(data)):
-                    if BENCHMARK_NAME == '101':
-                        matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(data[i].get('X'))
+                    X = []
+                    Y = []
+                    checked = []
+                    for i in range(len(data)):
+                        if BENCHMARK_NAME == '101':
+                            matrix_1D, ops_INT = split_to_matrix1D_and_opsINT(data[i].get('X'))
 
-                        matrix_2D = encoding_matrix(matrix_1D)
-                        ops_STRING = encoding_ops(ops_INT)
-                        modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
-                        hashX = BENCHMARK_API.get_module_hash(modelspec)
-                    else:
-                        hashX = convert_to_hashX(data[i].get('X'), BENCHMARK_NAME)
-                    if (hashX not in checked) and (hashX not in self.DS) and (hashX not in self.A_hashX):
-                        checked.append(hashX)
-                        F, _ = self.evaluate(data[i].get('X'), using_surrogate_model=False, count_nE=True)
-                        data[i].set('F', F)
-                        self.update_A(data[i])
-                        X.append(data[i].get('X'))
-                        Y.append(F[1])
-                for i in range(len(self.A_X)):
-                    X.append(self.A_X[i])
-                    Y.append(self.A_F[i][1])
-                X = np.array(X)
-                Y = np.array(Y)
-                if self.update_model:
+                            matrix_2D = encoding_matrix(matrix_1D)
+                            ops_STRING = encoding_ops(ops_INT)
+                            modelspec = api.ModelSpec(matrix=matrix_2D, ops=ops_STRING)
+                            hashX = BENCHMARK_API.get_module_hash(modelspec)
+                        else:
+                            hashX = convert_to_hashX(data[i].get('X'), BENCHMARK_NAME)
+                        if (hashX not in checked) and (hashX not in self.DS) and (hashX not in self.A_hashX):
+                            checked.append(hashX)
+                            F, _ = self.evaluate(data[i].get('X'), using_surrogate_model=False, count_nE=True)
+                            data[i].set('F', F)
+                            self.update_A(data[i])
+                            X.append(data[i].get('X'))
+                            Y.append(F[1])
+                    for i in range(len(self.A_X)):
+                        X.append(self.A_X[i])
+                        Y.append(self.A_F[i][1])
+                    X = np.array(X)
+                    Y = np.array(Y)
+
                     self.n_updates += 1
                     if BENCHMARK_NAME == '101':
                         self.surrogate_model.fit(x=X, y=Y)
                     else:
                         self.surrogate_model.fit(x=encode(X, BENCHMARK_NAME), y=Y, verbose=False)
 
-        if DEBUG:
-            print(f'Number of evaluations used: {self.nEs}/{self.m_nEs}')
+        pf = np.array(self.A_F)
+        pf = np.unique(pf, axis=0)
+        pf = pf[np.argsort(pf[:, 0])]
 
-        if SAVE:
-            pf = np.array(self.A_F)
-            pf = np.unique(pf, axis=0)
-            pf = pf[np.argsort(pf[:, 0])]
+        p.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
+        p.dump(self.A_X, open(f'{self.path}/elitist_archive/gen_{self.n_gen}.p', 'wb'))
 
-            p.dump([pf, self.nEs], open(f'{self.path}/pf_eval/pf_and_evaluated_gen_{self.n_gen}.p', 'wb'))
-            p.dump(self.A_X, open(f'{self.path}/elitist_archive/gen_{self.n_gen}.p', 'wb'))
+        self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
+        self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
 
-            self.worst_f0 = max(self.worst_f0, np.max(pf[:, 0]))
-            self.worst_f1 = max(self.worst_f1, np.max(pf[:, 1]))
+        IGD = calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE)
 
-            IGD = calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE)
-            if len(self.no_eval) == 0:
+        if len(self.no_eval) == 0:
+            self.IGD.append(IGD)
+            self.no_eval.append(self.nEs)
+        else:
+            if self.nEs == self.no_eval[-1]:
+                self.IGD[-1] = IGD
+            else:
                 self.IGD.append(IGD)
                 self.no_eval.append(self.nEs)
+
+        if not first:
+            if self.IGD[-1] - self.IGD[-2] == 0:
+                self.NIS += 1
             else:
-                if self.nEs == self.no_eval[-1]:
-                    self.IGD[-1] = IGD
-                else:
-                    self.IGD.append(IGD)
-                    self.no_eval.append(self.nEs)
+                self.NIS = 0
+
+        if (self.NIS == 100 or self.IGD[-1] == 0) and not self.converging:
+            self.converging = True
+            self.nEs_converging = self.nEs
+
+        if DEBUG:
+            print(f'Number of evaluations used: {self.nEs}/{self.m_nEs}')
+            print(IGD)
 
     def _finalize(self):
         self.A_X = np.array(self.A_X)
@@ -980,7 +1007,7 @@ if __name__ == '__main__':
 
     ''' ------- '''
     SAVE = True
-    DEBUG = False
+    DEBUG = True
 
     ALGORITHM_NAME = 'MOEAD'
     N_POINTS = 15
