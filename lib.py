@@ -10,13 +10,19 @@ import torch
 from acc_predictor.factory import get_acc_predictor
 from datetime import datetime
 
+from pymoo.cython.decomposition import Tchebicheff
+
 from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
 from pymoo.operators.default_operators import set_if_none
 from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
 from pymoo.operators.sampling.random_sampling import RandomSampling
 from pymoo.operators.selection.tournament_selection import TournamentSelection
+
 from pymoo.util.display import disp_multi_objective
 from pymoo.util.non_dominated_sorting import NonDominatedSorting
+from pymoo.util.reference_direction import UniformReferenceDirectionFactory
+
+from scipy.spatial.distance import cdist
 
 from nasbench import wrap_api as api
 
