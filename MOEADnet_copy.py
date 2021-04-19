@@ -1,37 +1,4 @@
-import argparse
-import os
-import matplotlib.pyplot as plt
-import numpy as np
-import pickle as p
-import timeit
-import torch
-
-from acc_predictor.factory import get_acc_predictor
-from datetime import datetime
-
-from pymoo.algorithms.genetic_algorithm import GeneticAlgorithm
-from pymoo.cython.decomposition import Tchebicheff
-from pymoo.operators.crossover.simulated_binary_crossover import SimulatedBinaryCrossover
-from pymoo.operators.default_operators import set_if_none
-from pymoo.operators.mutation.polynomial_mutation import PolynomialMutation
-from pymoo.operators.sampling.random_sampling import RandomSampling
-from pymoo.rand import random
-from pymoo.util.non_dominated_sorting import NonDominatedSorting
-from pymoo.util.display import disp_multi_objective
-from pymoo.util.reference_direction import UniformReferenceDirectionFactory
-
-from scipy.spatial.distance import cdist
-
-from nasbench import wrap_api as api
-
-from wrap_pymoo.model.population import MyPopulation as Population
-from wrap_pymoo.util.compare import find_better_idv
-from wrap_pymoo.util.IGD_calculating import calc_IGD
-# from wrap_pymoo.util.elitist_archive import update_elitist_archive
-from wrap_pymoo.util.find_knee_solutions import cal_angle, kiem_tra_p1_nam_phia_tren_hay_duoi_p2_p3
-
-from wrap_pymoo.factory_nasbench import combine_matrix1D_and_opsINT, split_to_matrix1D_and_opsINT, create_model
-from wrap_pymoo.factory_nasbench import encoding_ops, decoding_ops, encoding_matrix, decoding_matrix
+from lib import *
 
 
 def encode(X, benchmark):
@@ -157,7 +124,6 @@ class MOEADNET(GeneticAlgorithm):
         self._decomposition = None
         self.ideal_point = None
 
-        set_if_none(kwargs, 'pop_size', len(ref_dirs))
         set_if_none(kwargs, 'sampling', RandomSampling())
         set_if_none(kwargs, 'crossover', SimulatedBinaryCrossover(prob=1.0, eta=20))
         set_if_none(kwargs, 'mutation', PolynomialMutation(prob=None, eta=20))
@@ -178,7 +144,6 @@ class MOEADNET(GeneticAlgorithm):
         self.neighbors = np.argsort(cdist(self.ref_dirs, self.ref_dirs), axis=1, kind='quicksort')[:, :self.n_neighbors]
 
         ''' Custom '''
-        self.NIS = 0
         self.nEs_converging = 0
         self.converging = False
 
@@ -191,7 +156,7 @@ class MOEADNET(GeneticAlgorithm):
         self.tmp_A_X, self.tmp_A_hashX, self.tmp_A_F = [], [], []
 
         self.IGD = []
-        self.no_eval = []
+        self.n_evals = []
 
         self.m_nEs = m_nEs
 
@@ -609,9 +574,8 @@ class MOEADNET(GeneticAlgorithm):
                             return new_O
 
     def _initialize_custom(self):
-        self._decomposition = Tchebicheff()
-
         pop = self._sampling(self.pop_size)
+
         if self.using_surrogate_model:
             if BENCHMARK_NAME == '101':
                 self.surrogate_model = self._create_surrogate_model(inputs=pop.get('X'),
@@ -620,6 +584,7 @@ class MOEADNET(GeneticAlgorithm):
                 self.surrogate_model = self._create_surrogate_model(inputs=encode(pop.get('X'), BENCHMARK_NAME),
                                                                     targets=pop.get('F')[:, 1])
 
+        self._decomposition = Tchebicheff()
         self.ideal_point = np.min(pop.get('F'), axis=0)
 
         return pop
@@ -690,11 +655,11 @@ class MOEADNET(GeneticAlgorithm):
                     if i == first and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                         better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
                                                      f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1],
-                                                     pos='first')
+                                                     pos=0)
                     elif i == last and LOCAL_SEARCH_ON_KNEE_SOLUTIONS:
                         better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
                                                      f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1],
-                                                     pos='last')
+                                                     pos=-1)
                     else:
                         better_idv = find_better_idv(f0_0=o_F[0], f0_1=o_F[1],
                                                      f1_0=S[i].get('F')[0], f1_1=S[i].get('F')[1])
@@ -797,11 +762,9 @@ class MOEADNET(GeneticAlgorithm):
 
     def _mating(self, pop):
         # iterate for each member of the population in random order
-        idxs = random.perm(len(pop))
-
-        for idx in idxs:
+        for i in np.random.permutation(len(pop)):
             # all neighbors of this individual and corresponding weights
-            N = self.neighbors[idx, :]
+            N = self.neighbors[i, :]
             '''
             N: bieu dien vi tri neighbor cua ca the thu idx trong quan the
 
@@ -810,10 +773,10 @@ class MOEADNET(GeneticAlgorithm):
             neighbor ngau nhien
             - nguoc lai thi chon ngau nhien 2 ca the trong quan the va tien hanh lai ghep
             '''
-            if random.random() < self.prob_neighbor_mating:
-                idx_ = N[random.perm(self.n_neighbors)][:self.crossover.n_parents]
+            if np.random.random() < self.prob_neighbor_mating:
+                idx_ = N[np.random.permutation(self.n_neighbors)][:self.crossover.n_parents]
             else:
-                idx_ = random.perm(self.pop_size)[:self.crossover.n_parents]
+                idx_ = np.random.permutation(self.pop_size)[:self.crossover.n_parents]
 
             # crossover
             off = self._crossover(idx=idx_, P=pop)
@@ -821,7 +784,7 @@ class MOEADNET(GeneticAlgorithm):
             # mutation
             off = self._mutation(P=pop, O=off)
 
-            off = off[random.randint(0, len(off))]
+            off = off[np.random.randint(0, len(off))]
             off_F = off.get('F')
 
             # update the ideal point
@@ -868,9 +831,6 @@ class MOEADNET(GeneticAlgorithm):
     def _do_each_gen(self, first=False):
         if self.using_surrogate_model:
             self.alpha = np.mean(self.F_total)
-
-            # if self.m_nEs - self.nEs < 2 * self.m_nEs // 3 or self.n_updates == 15:
-            #     self.update_model = False
 
             if not first:
                 tmp_set_X = np.array(self.tmp_A_X)
@@ -940,27 +900,22 @@ class MOEADNET(GeneticAlgorithm):
 
         IGD = calc_IGD(pareto_s=pf, pareto_front=BENCHMARK_PF_TRUE)
 
-        if len(self.no_eval) == 0:
+        if first:
             self.IGD.append(IGD)
-            self.no_eval.append(self.nEs)
+            self.n_evals.append(self.nEs)
         else:
-            if self.nEs == self.no_eval[-1]:
+            if self.nEs == self.n_evals[-1]:
                 self.IGD[-1] = IGD
             else:
                 self.IGD.append(IGD)
-                self.no_eval.append(self.nEs)
+                self.n_evals.append(self.nEs)
 
-        if not first:
-            if self.IGD[-1] - self.IGD[-2] == 0:
-                self.NIS += 1
-            else:
-                self.NIS = 0
-
-        if (self.NIS == 100 or self.IGD[-1] == 0) and not self.converging:
+        if self.IGD[-1] == 0 and not self.converging:
             self.converging = True
             self.nEs_converging = self.nEs
 
         if DEBUG:
+            os.system('cls')
             print(f'Number of evaluations used: {self.nEs}/{self.m_nEs}')
             print(IGD)
 
@@ -973,8 +928,8 @@ class MOEADNET(GeneticAlgorithm):
         if SAVE:
             p.dump([self.worst_f0, self.worst_f1], open(f'{self.path}/reference_point.p', 'wb'))
             # visualize IGD
-            p.dump([self.no_eval, self.IGD], open(f'{self.path}/#Evals_IGD.p', 'wb'))
-            plt.plot(self.no_eval, self.IGD)
+            p.dump([self.n_evals, self.IGD], open(f'{self.path}/#Evals_IGD.p', 'wb'))
+            plt.plot(self.n_evals, self.IGD)
             plt.xlabel('#Evals')
             plt.ylabel('IGD')
             plt.grid()
@@ -1010,7 +965,7 @@ if __name__ == '__main__':
     DEBUG = True
 
     ALGORITHM_NAME = 'MOEAD'
-    N_POINTS = 15
+    # N_POINTS = 100
 
     NUMBER_OF_RUNS = args.n_runs
     INIT_SEED = args.seed
@@ -1026,7 +981,7 @@ if __name__ == '__main__':
         OBJECTIVE_1 = 'FLOPs'
     OBJECTIVE_2 = 'valid_acc'
 
-    user_input = [[0, 0, '2X', 1, 10]]
+    user_input = [[1, 1, '2X', 0, 0]]
 
     PATH_DATA = args.path + '/BENCHMARKS'
 
@@ -1067,7 +1022,7 @@ if __name__ == '__main__':
 
         now = datetime.now()
         dir_name = now.strftime(
-            f'{BENCHMARK_NAME}_{SEARCH_SPACE}_{ALGORITHM_NAME}_{POP_SIZE}_{N_POINTS}_{CROSSOVER_TYPE}_'
+            f'{BENCHMARK_NAME}_{SEARCH_SPACE}_{ALGORITHM_NAME}_{POP_SIZE}_{CROSSOVER_TYPE}_'
             f'{LOCAL_SEARCH_ON_KNEE_SOLUTIONS}_{LOCAL_SEARCH_ON_N_POINTS}_'
             f'{USING_SURROGATE_MODEL}_{UPDATE_MODEL_AFTER_N_GENS}_'
             f'd%d_m%m_H%H_M%M_S%S')
@@ -1079,8 +1034,8 @@ if __name__ == '__main__':
         f_log = open(ROOT_PATH + '/log_file.txt', 'w')
         f_log.write(f'- #RUNS: {NUMBER_OF_RUNS}\n- BENCHMARK: {BENCHMARK_NAME}\n- SEARCH_SPACE: {SEARCH_SPACE}\n'
                     f'- OBJECTIVE 1: {OBJECTIVE_1}\n- OBJECTIVE 2: Validation error\n'
-                    f'- ALGORITHM: {ALGORITHM_NAME}\n- POP_SIZE: {POP_SIZE}\n- #MAX_EVALS: {MAX_NO_EVALUATIONS}\n'
-                    f'- N_POINTS: {N_POINTS}\n- CROSSOVER_TYPE: {CROSSOVER_TYPE}\n- LOCAL_SEARCH_ON_KNEE_SOLUTIONS: '
+                    f'- ALGORITHM: {ALGORITHM_NAME}\n- POP_SIZE: {POP_SIZE}\n- MAX_#EVALS: {MAX_NO_EVALUATIONS}\n'
+                    f'- CROSSOVER_TYPE: {CROSSOVER_TYPE}\n- LOCAL_SEARCH_ON_KNEE_SOLUTIONS: '
                     f'{bool(LOCAL_SEARCH_ON_KNEE_SOLUTIONS)}\n- LOCAL_SEARCH_ON_#POINTS: {LOCAL_SEARCH_ON_N_POINTS}\n'
                     f'- USING_SURROGATE_MODEL: {bool(USING_SURROGATE_MODEL)}\n- UPDATE_MODEL_AFTER_#GENS: '
                     f'{UPDATE_MODEL_AFTER_N_GENS}')
@@ -1105,18 +1060,21 @@ if __name__ == '__main__':
             os.mkdir(SUB_PATH + '/elitist_archive')
             print(f'--> Create folder {SUB_PATH}/elitist_archive - Done\n')
 
-            INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=N_POINTS).do()
+            INIT_REF_DIRS = UniformReferenceDirectionFactory(n_dim=2, n_points=POP_SIZE).do()
 
-            net = MOEADNET(
-                m_nEs=MAX_NO_EVALUATIONS,
-                typeC=CROSSOVER_TYPE,
-                local_search_on_n_vars=LOCAL_SEARCH_ON_N_POINTS,
-                using_surrogate_model=USING_SURROGATE_MODEL,
-                update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
-                path=SUB_PATH,
-                ref_dirs=INIT_REF_DIRS,
-                n_neighbors=10,
-                prob_neighbor_mating=1.0)
+            np.random.seed(SEED)
+            torch.random.manual_seed(SEED)
+
+            net = MOEADNET(m_nEs=MAX_NO_EVALUATIONS,
+                           pop_size=POP_SIZE,
+                           typeC=CROSSOVER_TYPE,
+                           local_search_on_n_vars=LOCAL_SEARCH_ON_N_POINTS,
+                           using_surrogate_model=USING_SURROGATE_MODEL,
+                           update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
+                           path=SUB_PATH,
+                           ref_dirs=INIT_REF_DIRS,
+                           n_neighbors=4,
+                           prob_neighbor_mating=1.0)
 
             start = timeit.default_timer()
             print(f'--> Experiment {i_run + 1} is running.')

@@ -1,4 +1,4 @@
-def find_better_idv(f0_0, f0_1, f1_1, f1_0, pos=None):
+def find_better_idv(f0_0, f0_1, f1_0, f1_1, pos=None):
     """
     - Find the better individual between two individuals input.\n
     - If the individual has the highest f1 or f2, just check value f1 or f2 to find better individual.
@@ -16,17 +16,11 @@ def find_better_idv(f0_0, f0_1, f1_1, f1_0, pos=None):
             return 0
         if (f1_0 <= f0_0 and f1_1 < f0_1) or (f1_0 < f0_0 and f1_1 <= f0_1):
             return 1
-    elif pos == 'first':
-        if f0_0 < f1_0:
-            return 0
-        if f1_0 <= f0_0:
-            return 1
+        return -1
+    elif pos == 0:
+        return 0 if f0_0 < f1_0 else 1
     else:
-        if f0_1 < f1_1:
-            return 0
-        if f1_1 <= f0_1:
-            return 1
-    return -1
+        return 0 if f0_1 < f1_1 else 1
 
 
 def find_better_idv_bosman_ver(alpha, f0_0, f0_1, f1_1, f1_0):
@@ -44,6 +38,5 @@ def find_better_idv_bosman_ver(alpha, f0_0, f0_1, f1_1, f1_0):
     """
     f1_new = alpha * f0_0 + (1 - alpha) * f0_1
     f2_new = alpha * f1_0 + (1 - alpha) * f1_1
-    if f1_new < f2_new:
-        return 0
-    return 1
+    return 0 if f1_new < f2_new else 1
+
