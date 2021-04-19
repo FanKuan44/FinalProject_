@@ -481,6 +481,7 @@ class MOEADNET(GeneticAlgorithm):
 
         i = 0
         pM = 1 / len(old_O_X[0])
+        n_mutations = 0
         while True:
             if BENCHMARK_NAME == '101':
                 for x in old_O_X:
@@ -550,8 +551,30 @@ class MOEADNET(GeneticAlgorithm):
                             X[n] = np.random.choice(allowed_opt)
 
                     hashX = convert_to_hashX(X, BENCHMARK_NAME)
+                    # (hashX not in P_hashX)
+                    if n_mutations <= 100:
+                        if (hashX not in new_O_hashX) and (hashX not in self.A_hashX) and (hashX not in self.DS):
+                            new_O_hashX.append(hashX)
 
-                    if (hashX not in new_O_hashX) and (hashX not in P_hashX) and (hashX not in self.DS):
+                            F, twice = self.evaluate(X=X, using_surrogate_model=self.using_surrogate_model)
+
+                            new_O[i].set('X', X)
+                            new_O[i].set('hashX', hashX)
+                            new_O[i].set('F', F)
+
+                            if not self.using_surrogate_model:
+                                self.update_A(new_O[i])
+                            else:
+                                if twice:
+                                    self.update_A(new_O[i])
+                                else:
+                                    self.training_data.append(new_O[i])
+                                    self.update_fake_A(new_O[i])
+
+                            i += 1
+                            if i == len(O):
+                                return new_O
+                    else:
                         new_O_hashX.append(hashX)
 
                         F, twice = self.evaluate(X=X, using_surrogate_model=self.using_surrogate_model)
@@ -572,6 +595,7 @@ class MOEADNET(GeneticAlgorithm):
                         i += 1
                         if i == len(O):
                             return new_O
+            n_mutations += 1
 
     def _initialize_custom(self):
         pop = self._sampling(self.pop_size)
@@ -797,7 +821,6 @@ class MOEADNET(GeneticAlgorithm):
             # get the absolute index in F where offspring is better than the current F (decomposed space)
             I = np.where(off_FV < FV)[0]
             pop[N[I]] = off
-
         return pop
 
     def _next(self, pop):
@@ -915,7 +938,7 @@ class MOEADNET(GeneticAlgorithm):
             self.nEs_converging = self.nEs
 
         if DEBUG:
-            os.system('cls')
+            # os.system('cls')
             print(f'Number of evaluations used: {self.nEs}/{self.m_nEs}')
             print(IGD)
 
@@ -962,7 +985,7 @@ if __name__ == '__main__':
 
     ''' ------- '''
     SAVE = True
-    DEBUG = True
+    DEBUG = False
 
     ALGORITHM_NAME = 'MOEAD'
     # N_POINTS = 100
@@ -981,7 +1004,8 @@ if __name__ == '__main__':
         OBJECTIVE_1 = 'FLOPs'
     OBJECTIVE_2 = 'valid_acc'
 
-    user_input = [[1, 1, '2X', 0, 0]]
+    user_input = [[1, 1, '2X', 0, 0],
+                  [1, 2, '2X', 0, 0]]
 
     PATH_DATA = args.path + '/BENCHMARKS'
 
@@ -1073,7 +1097,7 @@ if __name__ == '__main__':
                            update_model_after_n_gens=UPDATE_MODEL_AFTER_N_GENS,
                            path=SUB_PATH,
                            ref_dirs=INIT_REF_DIRS,
-                           n_neighbors=4,
+                           n_neighbors=20,
                            prob_neighbor_mating=1.0)
 
             start = timeit.default_timer()
