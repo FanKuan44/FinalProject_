@@ -378,7 +378,7 @@ class MOEADNET(GeneticAlgorithm):
                                             self.update_fake_A(O[i])
 
                                     i += 1
-                                    if i == len(P):
+                                    if i == len(P_):
                                         return O
                             else:
                                 O_hashX.append(new_O_hashX)
@@ -509,7 +509,30 @@ class MOEADNET(GeneticAlgorithm):
 
                     if BENCHMARK_API.is_valid(new_MS):
                         hashX = BENCHMARK_API.get_module_hash(new_MS)
-                        if (hashX not in new_O_hashX) and (hashX not in P_hashX) and (hashX not in self.DS):
+                        if n_mutations <= 100:
+                            if (hashX not in new_O_hashX) and (hashX not in self.A_hashX) and (hashX not in self.DS):
+                                X = combine_matrix1D_and_opsINT(new_matrix_1D, new_ops_INT)
+                                new_O_hashX.append(hashX)
+
+                                F, twice = self.evaluate(X=X, using_surrogate_model=self.using_surrogate_model)
+
+                                new_O[i].set('X', X)
+                                new_O[i].set('hashX', hashX)
+                                new_O[i].set('F', F)
+
+                                if not self.using_surrogate_model:
+                                    self.update_A(new_O[i])
+                                else:
+                                    if twice:
+                                        self.update_A(new_O[i])
+                                    else:
+                                        self.training_data.append(new_O[i])
+                                        self.update_fake_A(new_O[i])
+
+                                i += 1
+                                if i == len(O):
+                                    return new_O
+                        else:
                             X = combine_matrix1D_and_opsINT(new_matrix_1D, new_ops_INT)
                             new_O_hashX.append(hashX)
 
@@ -1004,8 +1027,9 @@ if __name__ == '__main__':
         OBJECTIVE_1 = 'FLOPs'
     OBJECTIVE_2 = 'valid_acc'
 
-    user_input = [[1, 1, '2X', 0, 0],
-                  [1, 2, '2X', 0, 0]]
+    user_input = [[0, 0, '2X', 0, 0],
+                  [1, 1, '2X', 0, 0],
+                  [1, 2, '2X', 0, 0],]
 
     PATH_DATA = args.path + '/BENCHMARKS'
 
